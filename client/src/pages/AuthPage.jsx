@@ -6,6 +6,15 @@ import NeonButton from "../components/NeonButton";
 import AppLayout from "../layouts/AppLayout";
 import api, { setAuthToken } from "../services/api";
 
+function FieldWithIcon({ icon, children }) {
+  return (
+    <div className="auth-input-wrap">
+      <span className="auth-input-icon">{icon}</span>
+      <div className="flex-1">{children}</div>
+    </div>
+  );
+}
+
 export default function AuthPage({ setSession }) {
   const { role } = useParams();
   const navigate = useNavigate();
@@ -46,7 +55,10 @@ export default function AuthPage({ setSession }) {
       <div className="grid gap-5 lg:grid-cols-[1.2fr_1.6fr]">
         <GlassCard className="space-y-4 auth-shell glass-animated">
           <p className="text-xs uppercase tracking-[0.22em] text-neon-cyan">Role Session</p>
-          <h2 className="text-2xl font-semibold text-white">{roleLabel}</h2>
+          <div className="flex items-center gap-2">
+            <span className="auth-icon-wrap text-lg">{role === "parent" ? "🛡️" : role === "student" ? "🎓" : "🌐"}</span>
+            <h2 className="text-2xl font-semibold text-white">{roleLabel}</h2>
+          </div>
           <p className="text-sm text-white/70">
             {role === "parent" && "Manage students, enforce restrictions, and monitor activity in real time."}
             {role === "student" && "Access guided browser mode with parental policy controls."}
@@ -60,21 +72,37 @@ export default function AuthPage({ setSession }) {
         <GlassCard className="auth-card max-w-2xl glass-animated">
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
             {isSignup && (
-              <input className="field auth-field" placeholder="Full name" onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <FieldWithIcon icon="👤">
+                <input
+                  className="field auth-field"
+                  placeholder="Full name"
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              </FieldWithIcon>
             )}
-            <input className="field auth-field" placeholder="Email address" onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            <input
-              className="field auth-field"
-              type="password"
-              placeholder="Password"
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-            />
-            {role === "student" && isSignup && (
+            <FieldWithIcon icon="✉️">
               <input
                 className="field auth-field"
-                placeholder="Parent email or invite code"
-                onChange={(e) => setForm({ ...form, parentEmail: e.target.value })}
+                placeholder="Email address"
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
               />
+            </FieldWithIcon>
+            <FieldWithIcon icon="🔒">
+              <input
+                className="field auth-field"
+                type="password"
+                placeholder="Password"
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+              />
+            </FieldWithIcon>
+            {role === "student" && isSignup && (
+              <FieldWithIcon icon="👨‍👩‍👧">
+                <input
+                  className="field auth-field"
+                  placeholder="Parent email or invite code"
+                  onChange={(e) => setForm({ ...form, parentEmail: e.target.value })}
+                />
+              </FieldWithIcon>
             )}
             <div className="flex flex-wrap items-center gap-3 pt-1">
               <NeonButton onClick={submit} disabled={loading}>

@@ -3,6 +3,19 @@ import { motion } from "framer-motion";
 import GlassCard from "../components/GlassCard";
 import AppLayout from "../layouts/AppLayout";
 
+function RoleIcon({ roleId }) {
+  const iconMap = {
+    parent: "🛡️",
+    student: "🎓",
+    normal: "🌐"
+  };
+  return (
+    <div className="auth-icon-wrap">
+      <span className="text-lg">{iconMap[roleId] || "✨"}</span>
+    </div>
+  );
+}
+
 const roles = [
   {
     id: "parent",
@@ -50,6 +63,7 @@ export default function RoleSelectionPage() {
               onClick={() => navigate(`/auth/${role.id}`)}
               className="group auth-role-card rounded-2xl border border-white/20 bg-gradient-to-b from-white/20 to-white/5 p-4 text-left backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-cyan-300/60 hover:shadow-[0_0_24px_rgba(0,245,255,0.2)]"
             >
+              <RoleIcon roleId={role.id} />
               <p className="text-base font-semibold text-white">{role.label}</p>
               <p className="mt-1 text-xs text-cyan-200">{role.subtitle}</p>
               <p className="mt-3 text-xs leading-relaxed text-white/70">{role.desc}</p>

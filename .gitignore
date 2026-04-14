@@ -2,3 +2,6 @@ client/release/
 client/dist/
 node_modules/
 .envc
+
+client/node_modules/
+server/node_modules/
