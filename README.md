@@ -196,6 +196,14 @@ npm install
 npm run electron:build
 ```
 
+If Windows blocks symlink extraction during `electron-builder` (winCodeSign cache error), use:
+
+```bash
+npm run electron:build:unsigned
+```
+
+Also enable **Developer Mode** in Windows or run terminal as **Administrator**.
+
 Installer output appears in `client/release/`.
 
 ## 15) Cloud-Only Runtime Model (AWS + WebSocket)

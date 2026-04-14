@@ -1,6 +1,8 @@
 {
   "name": "aivora-cloud-browser-client",
   "version": "1.0.0",
+  "description": "Aivora lightweight desktop cloud browser client",
+  "author": "Aivora Team",
   "private": true,
   "type": "module",
   "main": "electron/main.js",
@@ -10,7 +12,10 @@
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "npm run build && electron-builder",
-    "electron:pack": "npm run build && electron-builder --dir"
+    "electron:build:unsigned": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win nsis -c.win.signAndEditExecutable=false",
+    "electron:build:portable": "npm run build && electron-builder --win portable -c.win.signAndEditExecutable=false",
+    "electron:pack": "npm run build && electron-builder --dir",
+    "electron:build:nsis:no-sign-edit": "npm run build && electron-builder --win nsis -c.win.signAndEditExecutable=false"
   },
   "dependencies": {
     "axios": "^1.7.4",
@@ -24,6 +29,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
     "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
     "electron": "^31.4.0",
     "electron-builder": "^24.13.3",
     "postcss": "^8.4.44",
@@ -43,6 +49,7 @@
       "output": "release"
     },
     "win": {
+      "signAndEditExecutable": false,
       "target": [
         "nsis"
       ]

@@ -69,6 +69,23 @@ export async function login(req, res) {
   });
 }
 
+export async function refreshSession(req, res) {
+  const token = buildToken(req.user);
+  res.json({
+    token,
+    user: {
+      id: req.user._id,
+      name: req.user.name,
+      email: req.user.email,
+      role: req.user.role,
+      avatarUrl: req.user.avatarUrl,
+      locationLabel: req.user.locationLabel,
+      integrations: req.user.integrations,
+      preferences: req.user.preferences
+    }
+  });
+}
+
 export async function getMe(req, res) {
   res.json({
     user: {

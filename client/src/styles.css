@@ -23,6 +23,23 @@ body {
   box-shadow: 0 0 0 4px rgba(0, 245, 255, 0.12);
 }
 
+.auth-card {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.55), rgba(15, 23, 42, 0.25));
+}
+
+.auth-field {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.auth-shell {
+  background: linear-gradient(140deg, rgba(8, 14, 36, 0.58), rgba(30, 41, 59, 0.2));
+}
+
+.auth-role-card {
+  min-height: 210px;
+}
+
 .soft-field {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.4);

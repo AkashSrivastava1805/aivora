@@ -5,6 +5,7 @@ import {
   getSpotifyConnectUrl,
   getSpotifyStatus,
   login,
+  refreshSession,
   signup,
   spotifyCallback,
   updateAdvancedSettings,
@@ -17,6 +18,7 @@ const router = Router();
 
 router.post("/signup", signup);
 router.post("/login", login);
+router.post("/refresh", authMiddleware, refreshSession);
 router.get("/me", authMiddleware, getMe);
 router.patch("/me", authMiddleware, updateMe);
 router.patch("/me/preferences", authMiddleware, updatePreferences);
