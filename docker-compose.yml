@@ -1,0 +1,27 @@
+version: "3.9"
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  server:
+    build:
+      context: ./server
+    restart: unless-stopped
+    environment:
+      PORT: 4000
+      MONGO_URI: mongodb://mongodb:27017/aivora
+      JWT_SECRET: replace-this-in-production
+      CLIENT_ORIGIN: http://localhost:5173
+      NODE_ENV: production
+    ports:
+      - "4000:4000"
+    depends_on:
+      - mongodb
+
+volumes:
+  mongo_data:

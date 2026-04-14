@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: Inter, Segoe UI, sans-serif;
+  color: #ffffff;
+}
+
+.field {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.65rem 0.9rem;
+  color: #fff;
+  outline: none;
+}
+
+.field:focus {
+  border-color: rgba(0, 245, 255, 0.65);
+  box-shadow: 0 0 0 4px rgba(0, 245, 255, 0.12);
+}
+
+.soft-field {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 0.75rem 1rem;
+  color: #0f172a;
+  outline: none;
+}
+
+.soft-chip {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 0.65rem 0.9rem;
+  color: #0f172a;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.soft-panel {
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.45);
+  padding: 0.85rem;
+  min-height: 210px;
+  color: #0f172a;
+}
+
+.soft-title {
+  margin-bottom: 0.6rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.glass-animated {
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-animated::before {
+  content: "";
+  position: absolute;
+  top: -20%;
+  left: -40%;
+  width: 35%;
+  height: 160%;
+  transform: rotate(20deg);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.3) 45%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: glassSweep 7s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes glassSweep {
+  0% {
+    left: -45%;
+  }
+  100% {
+    left: 120%;
+  }
+}
