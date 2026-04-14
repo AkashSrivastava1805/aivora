@@ -35,8 +35,12 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   const [actionStatus, setActionStatus] = useState("");
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
+  const [engineMode, setEngineMode] = useState("unknown");
 
   const isStudent = mode === "student";
+  const shellToneClass = isStudent
+    ? "from-indigo-200/25 to-violet-200/20"
+    : "from-cyan-200/25 to-sky-200/20";
 
   useEffect(() => {
     socket.connect();
@@ -51,6 +55,10 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     loadRecentSearches();
     loadSpotifyStatus();
     loadTabs();
+    loadEngineStatus();
+
+    const timer = setInterval(loadEngineStatus, 10000);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -246,6 +254,15 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     }
   }
 
+  async function loadEngineStatus() {
+    try {
+      const { data } = await api.get("/browser/engine-status");
+      setEngineMode(data.mode || "unknown");
+    } catch (_error) {
+      setEngineMode("unknown");
+    }
+  }
+
   async function switchTab(tabId) {
     try {
       const { data } = await api.post("/browser/switch-tab", { tabId });
@@ -272,7 +289,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     <AppLayout title={`${isStudent ? "Student" : "Normal User"} Cloud Browser`}>
       <WarningOverlay message={warning} onClose={() => setWarning("")} />
 
-      <div className="glass-animated rounded-3xl border border-white/30 bg-gradient-to-br from-white/25 to-sky-200/15 p-5 backdrop-blur-2xl">
+      <div className={`glass-animated rounded-3xl border border-white/30 bg-gradient-to-br ${shellToneClass} p-5 backdrop-blur-2xl`}>
         <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
           <aside className="space-y-4 rounded-2xl border border-white/25 bg-white/35 p-4 text-slate-900">
             <div className="flex items-center gap-3">
@@ -293,7 +310,24 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
               </div>
             </div>
             <div className="rounded-xl bg-white/60 p-3 text-sm">
-              <p className="font-medium">Cloud Engine</p>
+              <div className="flex items-center justify-between">
+                <p className="font-medium">Cloud Engine</p>
+                <span
+                  className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
+                    engineMode === "playwright"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : engineMode === "virtual"
+                        ? "bg-amber-100 text-amber-700"
+                        : "bg-slate-200 text-slate-700"
+                  }`}
+                >
+                  {engineMode === "playwright"
+                    ? "Playwright Mode"
+                    : engineMode === "virtual"
+                      ? "Virtual Mode"
+                      : "Checking..."}
+                </span>
+              </div>
               <p className="text-xs text-slate-700">Live heartbeat</p>
               <p className="mt-1 text-xs font-semibold text-cyan-700">{heartbeat || "Waiting..."}</p>
             </div>
@@ -319,7 +353,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
           </aside>
 
           <section className="space-y-4">
-            <div className="rounded-2xl border border-white/30 bg-white/50 p-4">
+            <div className="rounded-2xl border border-white/30 bg-white/50 p-4 shadow-[0_8px_28px_rgba(2,6,23,0.18)]">
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-sm font-semibold text-slate-800">Multi-Tab Cloud Session</p>
                 <button className="soft-chip" onClick={loadTabs}>
@@ -459,20 +493,27 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                   <p className="text-xs text-slate-600">Search results will appear here after you click Smart Search.</p>
                 )}
                 {resultItems.map((item) => (
-                  <button
-                    key={`${item.url}-${item.title}`}
-                    className="w-full rounded-xl border border-slate-300/60 bg-white/80 p-3 text-left"
-                    onClick={() => openResultTab(item)}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                      <span className="rounded-full bg-cyan-100 px-2 py-1 text-[10px] font-semibold text-cyan-800">
-                        {item.source || "Smart"}
-                      </span>
+                  <div key={`${item.url}-${item.title}`} className="rounded-xl border border-slate-300/60 bg-white/80 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <button className="flex-1 text-left" onClick={() => openResultTab(item)}>
+                        <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                      </button>
+                      <div className="flex items-center gap-1">
+                        <span className="rounded-full bg-cyan-100 px-2 py-1 text-[10px] font-semibold text-cyan-800">
+                          {item.source || "Smart"}
+                        </span>
+                        <button
+                          onClick={() => openResultTab(item)}
+                          className="rounded-full border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                          title="Open in cloud browser"
+                        >
+                          ↗
+                        </button>
+                      </div>
                     </div>
                     <p className="mt-1 text-xs text-slate-600">{item.snippet}</p>
                     <p className="mt-1 text-[11px] text-cyan-700">{item.url}</p>
-                  </button>
+                  </div>
                 ))}
               </div>
               {hasMoreResults && (

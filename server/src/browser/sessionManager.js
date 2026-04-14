@@ -2,15 +2,45 @@ import { chromium } from "playwright";
 
 const browserState = {
   browser: null,
-  userContexts: new Map()
+  userContexts: new Map(),
+  runtimeMode: "playwright"
 };
+
+function isPlaywrightExecutableMissing(error) {
+  return String(error?.message || "").includes("Executable doesn't exist");
+}
+
+function normalizeUrl(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "https://www.bing.com";
+  if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+  return `https://${raw}`;
+}
+
+function inferTitleFromUrl(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    return host || "New Tab";
+  } catch (_error) {
+    return "New Tab";
+  }
+}
 
 async function getBrowser() {
   if (!browserState.browser) {
-    browserState.browser = await chromium.launch({
-      headless: true,
-      args: ["--disable-dev-shm-usage", "--no-sandbox"]
-    });
+    try {
+      browserState.browser = await chromium.launch({
+        headless: true,
+        args: ["--disable-dev-shm-usage", "--no-sandbox"]
+      });
+      browserState.runtimeMode = "playwright";
+    } catch (error) {
+      if (isPlaywrightExecutableMissing(error)) {
+        browserState.runtimeMode = "virtual";
+        return null;
+      }
+      throw error;
+    }
   }
   return browserState.browser;
 }
@@ -31,6 +61,19 @@ export async function getOrCreateUserSession(userId) {
   if (existing) return existing;
 
   const browser = await getBrowser();
+  if (!browser) {
+    const fallbackUrl = "https://www.bing.com";
+    const session = {
+      context: null,
+      pages: [{ tabId: crypto.randomUUID(), page: null, url: fallbackUrl, title: inferTitleFromUrl(fallbackUrl) }],
+      activeTabId: null,
+      mode: "virtual"
+    };
+    session.activeTabId = session.pages[0].tabId;
+    browserState.userContexts.set(userId, session);
+    return session;
+  }
+
   const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto("https://www.bing.com");
@@ -38,7 +81,8 @@ export async function getOrCreateUserSession(userId) {
   const session = {
     context,
     pages: [{ tabId: crypto.randomUUID(), page, url: page.url(), title: "Start Page" }],
-    activeTabId: null
+    activeTabId: null,
+    mode: "playwright"
   };
 
   session.activeTabId = session.pages[0].tabId;
@@ -48,8 +92,21 @@ export async function getOrCreateUserSession(userId) {
 
 export async function openTab(userId, url) {
   const session = await getOrCreateUserSession(userId);
+  if (!session.context) {
+    const resolved = normalizeUrl(url);
+    const tab = {
+      tabId: crypto.randomUUID(),
+      page: null,
+      url: resolved,
+      title: inferTitleFromUrl(resolved)
+    };
+    session.pages.push(tab);
+    session.activeTabId = tab.tabId;
+    return tab;
+  }
+
   const page = await session.context.newPage();
-  await page.goto(url);
+  await page.goto(normalizeUrl(url));
 
   const tab = {
     tabId: crypto.randomUUID(),
@@ -69,7 +126,9 @@ export async function closeTab(userId, tabId) {
     return { session, found: false };
   }
 
-  await session.pages[index].page.close();
+  if (session.pages[index].page) {
+    await session.pages[index].page.close();
+  }
   session.pages.splice(index, 1);
   if (session.activeTabId === tabId && session.pages.length > 0) {
     session.activeTabId = session.pages[0].tabId;
@@ -91,6 +150,40 @@ export async function reconcileUserSession(userId, persistedTabs = [], persisted
   await disposeUserSession(userId);
 
   const browser = await getBrowser();
+  if (!browser) {
+    const rebuiltPages = (persistedTabs || []).map((tab) => {
+      const resolved = normalizeUrl(tab.url);
+      return {
+        tabId: tab.tabId || crypto.randomUUID(),
+        page: null,
+        url: resolved,
+        title: tab.title || inferTitleFromUrl(resolved)
+      };
+    });
+
+    if (rebuiltPages.length === 0) {
+      const fallbackUrl = "https://www.bing.com";
+      rebuiltPages.push({
+        tabId: crypto.randomUUID(),
+        page: null,
+        url: fallbackUrl,
+        title: inferTitleFromUrl(fallbackUrl)
+      });
+    }
+
+    const activeTabId =
+      rebuiltPages.find((tab) => tab.tabId === persistedActiveTabId)?.tabId || rebuiltPages[0].tabId;
+
+    const session = {
+      context: null,
+      pages: rebuiltPages,
+      activeTabId,
+      mode: "virtual"
+    };
+    browserState.userContexts.set(userId, session);
+    return session;
+  }
+
   const context = await browser.newContext();
   const rebuiltPages = [];
 
@@ -127,9 +220,18 @@ export async function reconcileUserSession(userId, persistedTabs = [], persisted
   const session = {
     context,
     pages: rebuiltPages,
-    activeTabId
+    activeTabId,
+    mode: "playwright"
   };
 
   browserState.userContexts.set(userId, session);
   return session;
+}
+
+export async function getEngineRuntimeStatus() {
+  await getBrowser();
+  return {
+    mode: browserState.runtimeMode,
+    isPlaywright: browserState.runtimeMode === "playwright"
+  };
 }

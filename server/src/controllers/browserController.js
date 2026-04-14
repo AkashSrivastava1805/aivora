@@ -1,6 +1,6 @@
 import { analyzeTabs } from "../ai/tabOptimizer.js";
 import { getSmartSearchResults } from "../ai/geminiSearch.js";
-import { closeTab, openTab, reconcileUserSession, switchTab } from "../browser/sessionManager.js";
+import { closeTab, getEngineRuntimeStatus, openTab, reconcileUserSession, switchTab } from "../browser/sessionManager.js";
 import { BrowserSession } from "../models/BrowserSession.js";
 import { History } from "../models/History.js";
 import { SearchCache } from "../models/SearchCache.js";
@@ -268,6 +268,15 @@ export async function reconcileTabsController(req, res, next) {
       tabs: updated.tabs,
       activeTabId: rebuilt.activeTabId
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getEngineStatusController(req, res, next) {
+  try {
+    const status = await getEngineRuntimeStatus();
+    res.json(status);
   } catch (error) {
     next(error);
   }

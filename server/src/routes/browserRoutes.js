@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   closeTabController,
+  getEngineStatusController,
   getRecentSearchesController,
   getTabsController,
   openTabController,
@@ -20,6 +21,7 @@ router.post("/switch-tab", switchTabController);
 router.post("/search", enforceStudentRestrictions, searchController);
 router.get("/recent-searches", getRecentSearchesController);
 router.get("/tabs", getTabsController);
+router.get("/engine-status", getEngineStatusController);
 router.post("/reconcile-tabs", reconcileTabsController);
 
 export default router;
