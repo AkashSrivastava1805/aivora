@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 
 const browserState = {
@@ -65,7 +66,7 @@ export async function getOrCreateUserSession(userId) {
     const fallbackUrl = "https://www.bing.com";
     const session = {
       context: null,
-      pages: [{ tabId: crypto.randomUUID(), page: null, url: fallbackUrl, title: inferTitleFromUrl(fallbackUrl) }],
+      pages: [{ tabId: randomUUID(), page: null, url: fallbackUrl, title: inferTitleFromUrl(fallbackUrl) }],
       activeTabId: null,
       mode: "virtual"
     };
@@ -80,7 +81,7 @@ export async function getOrCreateUserSession(userId) {
 
   const session = {
     context,
-    pages: [{ tabId: crypto.randomUUID(), page, url: page.url(), title: "Start Page" }],
+    pages: [{ tabId: randomUUID(), page, url: page.url(), title: "Start Page" }],
     activeTabId: null,
     mode: "playwright"
   };
@@ -95,7 +96,7 @@ export async function openTab(userId, url) {
   if (!session.context) {
     const resolved = normalizeUrl(url);
     const tab = {
-      tabId: crypto.randomUUID(),
+      tabId: randomUUID(),
       page: null,
       url: resolved,
       title: inferTitleFromUrl(resolved)
@@ -109,7 +110,7 @@ export async function openTab(userId, url) {
   await page.goto(normalizeUrl(url));
 
   const tab = {
-    tabId: crypto.randomUUID(),
+    tabId: randomUUID(),
     page,
     url: page.url(),
     title: await page.title()
@@ -154,7 +155,7 @@ export async function reconcileUserSession(userId, persistedTabs = [], persisted
     const rebuiltPages = (persistedTabs || []).map((tab) => {
       const resolved = normalizeUrl(tab.url);
       return {
-        tabId: tab.tabId || crypto.randomUUID(),
+        tabId: tab.tabId || randomUUID(),
         page: null,
         url: resolved,
         title: tab.title || inferTitleFromUrl(resolved)
@@ -164,7 +165,7 @@ export async function reconcileUserSession(userId, persistedTabs = [], persisted
     if (rebuiltPages.length === 0) {
       const fallbackUrl = "https://www.bing.com";
       rebuiltPages.push({
-        tabId: crypto.randomUUID(),
+        tabId: randomUUID(),
         page: null,
         url: fallbackUrl,
         title: inferTitleFromUrl(fallbackUrl)
@@ -207,7 +208,7 @@ export async function reconcileUserSession(userId, persistedTabs = [], persisted
     const page = await context.newPage();
     await page.goto("https://www.bing.com");
     rebuiltPages.push({
-      tabId: crypto.randomUUID(),
+      tabId: randomUUID(),
       page,
       url: page.url(),
       title: await page.title()
