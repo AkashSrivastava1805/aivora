@@ -1,0 +1,4 @@
+client/release/
+client/dist/
+node_modules/
+.envc
