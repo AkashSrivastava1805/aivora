@@ -263,6 +263,9 @@ Create `server/.env`:
 PORT=4000
 MONGO_URI=mongodb://localhost:27017/aivora
 JWT_SECRET=your-strong-secret
+# Single origin, or comma-separated (required if the browser runs on a different host than the API, e.g. local Vite → cloud API):
 CLIENT_ORIGIN=http://localhost:5173
+# Example when API is on AWS and you also test from local Vite:
+# CLIENT_ORIGIN=https://65.0.96.136.nip.io,http://localhost:5173
 NODE_ENV=development
 ```

@@ -10,7 +10,16 @@ import { env } from "./config/env.js";
 export function createApp() {
   const app = express();
 
-  app.use(cors({ origin: env.clientOrigin }));
+  app.use(
+    cors({
+      origin(origin, callback) {
+        if (!origin) return callback(null, true);
+        if (env.clientOrigins.includes(origin)) return callback(null, true);
+        return callback(null, false);
+      },
+      credentials: true
+    })
+  );
   app.use(express.json({ limit: "1mb" }));
   app.use(morgan("dev"));
 
