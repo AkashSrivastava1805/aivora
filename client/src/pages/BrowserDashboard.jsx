@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import WarningOverlay from "../components/WarningOverlay";
 import AppLayout from "../layouts/AppLayout";
@@ -34,7 +34,16 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
   const [engineMode, setEngineMode] = useState("unknown");
-  const [liveFrame, setLiveFrame] = useState({ imageBase64: null, url: "", title: "" });
+  const [liveFrame, setLiveFrame] = useState({
+    imageBase64: null,
+    url: "",
+    title: "",
+    viewportWidth: null,
+    viewportHeight: null,
+    tabId: null
+  });
+  const liveViewRef = useRef(null);
+  const viewportSizeRef = useRef({ w: 1280, h: 720 });
 
   const isStudent = mode === "student";
   const shellToneClass = isStudent
@@ -49,22 +58,72 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       tag: idx % 2 === 0 ? "Interactive" : "360 Content"
     }));
 
+  function joinUserSocketRoom() {
+    const uid = session?.user?.id;
+    if (!uid) return;
+    socket.emit("join-user-room", { userId: String(uid) });
+  }
+
+  function bumpLiveFrame() {
+    if (socket.connected) socket.emit("request-tab-frame");
+  }
+
+  function sendBrowserInput(input) {
+    const uid = session?.user?.id;
+    if (!uid || !socket.connected) return;
+    socket.emit("browser-input", { userId: String(uid), input });
+  }
+
+  function mapPointerToViewport(e, imgEl) {
+    if (!imgEl) return null;
+    const rect = imgEl.getBoundingClientRect();
+    const nw = imgEl.naturalWidth || viewportSizeRef.current.w;
+    const nh = imgEl.naturalHeight || viewportSizeRef.current.h;
+    if (!nw || !nh) return null;
+    const rw = rect.width;
+    const rh = rect.height;
+    const scale = Math.min(rw / nw, rh / nh);
+    const dispW = nw * scale;
+    const dispH = nh * scale;
+    const ox = (rw - dispW) / 2;
+    const oy = (rh - dispH) / 2;
+    const lx = e.clientX - rect.left - ox;
+    const ly = e.clientY - rect.top - oy;
+    if (lx < 0 || ly < 0 || lx > dispW || ly > dispH) return null;
+    return { x: (lx / dispW) * nw, y: (ly / dispH) * nh };
+  }
+
   useEffect(() => {
     socket.connect();
-    socket.on("platform-heartbeat", ({ at }) => setHeartbeat(at));
-    if (session?.user?.id) {
-      socket.emit("join-user-room", { userId: session.user.id });
-    }
-    socket.on("tab-frame", (frame) => {
+    const onHeartbeat = ({ at }) => setHeartbeat(at);
+    const onTabFrame = (frame) => {
+      const vw = frame?.viewportWidth;
+      const vh = frame?.viewportHeight;
+      if (vw && vh) viewportSizeRef.current = { w: vw, h: vh };
       setLiveFrame({
         imageBase64: frame?.imageBase64 || null,
         url: frame?.url || "",
-        title: frame?.title || ""
+        title: frame?.title || "",
+        viewportWidth: vw ?? null,
+        viewportHeight: vh ?? null,
+        tabId: frame?.tabId ?? null
       });
-    });
+    };
+    const onConnect = () => {
+      joinUserSocketRoom();
+      bumpLiveFrame();
+    };
+
+    socket.on("platform-heartbeat", onHeartbeat);
+    socket.on("tab-frame", onTabFrame);
+    socket.on("connect", onConnect);
+
+    if (socket.connected) onConnect();
+
     return () => {
-      socket.off("platform-heartbeat");
-      socket.off("tab-frame");
+      socket.off("platform-heartbeat", onHeartbeat);
+      socket.off("tab-frame", onTabFrame);
+      socket.off("connect", onConnect);
       socket.disconnect();
     };
   }, [session?.user?.id]);
@@ -189,6 +248,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setActionStatus(`Opened: ${resolvedUrl}`);
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
+      bumpLiveFrame();
     } catch (error) {
       if (error.response?.status === 403) setWarning(error.response?.data?.message || "Website blocked");
       else setActionStatus("Unable to open tab. Please verify URL.");
@@ -202,6 +262,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setActionStatus(`${label} opened in cloud browser.`);
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
+      bumpLiveFrame();
     } catch (error) {
       if (error.response?.status === 403) setWarning(error.response?.data?.message || "App blocked by parent policy");
       else setActionStatus(`Failed to open ${label}.`);
@@ -242,6 +303,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setActionStatus(`Opened result: ${item.title}`);
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
+      bumpLiveFrame();
     } catch (error) {
       if (error.response?.status === 403) {
         setWarning(error.response?.data?.message || "This result is blocked by policy.");
@@ -292,11 +354,13 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
         setActiveTabId(reconcile.data?.activeTabId || null);
         if (reconciledTabs.length > 0) {
           setActionStatus("Recovered previous cloud tabs after reconnect.");
+          bumpLiveFrame();
           return;
         }
       }
       setTabs(loadedTabs);
       setActiveTabId(data.activeTabId || null);
+      bumpLiveFrame();
     } catch (_error) {
       setTabs([]);
       setActiveTabId(null);
@@ -318,6 +382,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || tabId);
       setActionStatus("Switched active tab.");
+      bumpLiveFrame();
     } catch (_error) {
       setActionStatus("Unable to switch tab.");
     }
@@ -329,339 +394,341 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
       setActionStatus("Tab closed.");
+      bumpLiveFrame();
     } catch (_error) {
       setActionStatus("Unable to close tab.");
     }
   }
 
+  const canInteractLive = Boolean(liveFrame.imageBase64 && liveFrame.viewportWidth);
+
   return (
     <AppLayout title={`${isStudent ? "Student" : "Normal User"} Cloud Browser`}>
       <WarningOverlay message={warning} onClose={() => setWarning("")} />
 
-      <div className={`glass-animated rounded-3xl border border-white/30 bg-gradient-to-br ${shellToneClass} p-5 backdrop-blur-2xl`}>
-        <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
-          <aside className="space-y-4 rounded-2xl border border-white/25 bg-white/35 p-4 text-slate-900">
-            <div className="flex items-center gap-3">
-              {session?.user?.avatarUrl ? (
-                <img
-                  src={session.user.avatarUrl}
-                  alt="avatar"
-                  className="h-14 w-14 rounded-full border border-white/70 object-cover"
-                />
-              ) : (
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-sky-200 text-xl font-bold">
-                  {session?.user?.name?.[0] || "U"}
-                </div>
-              )}
-              <div>
-                <p className="font-semibold">{session?.user?.name || "User"}</p>
-                <p className="text-xs uppercase tracking-wider text-slate-700">{session?.user?.role || "normal"}</p>
+      <div className="edu-shell">
+        <div className="edu-grid">
+          <aside className="edu-sidebar">
+            <div className="edu-profile">
+              <div className="edu-avatar">
+                {session?.user?.avatarUrl ? (
+                  <img src={session.user.avatarUrl} alt="avatar" />
+                ) : (
+                  <div className="edu-avatar-fallback">{session?.user?.name?.[0] || "U"}</div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="edu-name truncate">{session?.user?.name || "User"}</p>
+                <p className="edu-sub truncate">{isStudent ? "Student" : "Normal User"}</p>
+                <p className="edu-sub truncate">{weather.label}</p>
               </div>
             </div>
-            <div className="rounded-xl bg-white/60 p-3 text-sm">
-              <div className="flex items-center justify-between">
-                <p className="font-medium">Cloud Engine</p>
-                <span
-                  className={`rounded-full px-2 py-1 text-[10px] font-semibold ${
-                    engineMode === "playwright"
-                      ? "bg-emerald-100 text-emerald-700"
-                      : engineMode === "virtual"
-                        ? "bg-amber-100 text-amber-700"
-                        : "bg-slate-200 text-slate-700"
-                  }`}
-                >
-                  {engineMode === "playwright"
-                    ? "Playwright Mode"
-                    : engineMode === "virtual"
-                      ? "Virtual Mode"
-                      : "Checking..."}
-                </span>
+
+            <div className="edu-nav">
+              <button className="edu-nav-btn" onClick={() => setActionStatus("Profile panel is coming soon.")}>
+                Profile
+              </button>
+              <button className="edu-nav-btn" onClick={() => setActionStatus(`Location: ${weather.label}`)}>
+                Location
+              </button>
+              <button className="edu-nav-btn" onClick={() => navigate("/settings")}>
+                Settings
+              </button>
+              <button className="edu-nav-btn danger" onClick={handleLogout}>
+                Log Out
+              </button>
+            </div>
+
+            <div className="edu-mini">
+              <div className="edu-pill">
+                <span>Cloud Engine</span>
+                <strong>{engineMode === "playwright" ? "Chromium" : engineMode === "virtual" ? "Virtual" : "..."}</strong>
               </div>
-              <p className="text-xs text-slate-700">Live heartbeat</p>
-              <p className="mt-1 text-xs font-semibold text-cyan-700">{heartbeat || "Waiting..."}</p>
+              <div className="edu-pill">
+                <span>Heartbeat</span>
+                <strong className="mono">{heartbeat ? new Date(heartbeat).toLocaleTimeString() : "--"}</strong>
+              </div>
             </div>
-            <div className="rounded-xl bg-white/60 p-3 text-sm">
-              <p className="font-medium">Weather / Location</p>
-              <p className="text-xs text-slate-700">{weather.label}</p>
-              <p className="mt-1 text-xs text-slate-800">
-                {weather.temp} | Wind {weather.wind}
-              </p>
-            </div>
-            <button
-              onClick={() => navigate("/settings")}
-              className="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
-            >
-              Open Settings
-            </button>
-            <button
-              onClick={handleLogout}
-              className="w-full rounded-xl bg-red-500/80 px-4 py-2 text-sm font-semibold text-white"
-            >
-              Logout
-            </button>
           </aside>
 
-          <section className="space-y-4">
-            <div className="rounded-2xl border border-white/20 bg-[#1a1035]/90 p-3">
-              <div className="chrome-topbar">
-                <button className="chrome-icon-btn" onClick={loadTabs} title="Refresh tabs" aria-label="Refresh tabs">
-                  ↻
-                </button>
-                <button className="chrome-icon-btn" onClick={handleHome} title="Home" aria-label="Home">
-                  ⌂
-                </button>
-                <div className="chrome-address-chip">
-                  <span className="chrome-lock">🔒</span>
-                  <input
-                    className="chrome-address-input"
-                    placeholder="Search Google or type a URL"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") runSearch();
-                    }}
-                  />
+          <main className="edu-main">
+            <header className="edu-header">
+              <div className="edu-brand">
+                <div className="edu-logo">Ai</div>
+                <div>
+                  <p className="edu-brand-title">AiVoraLearn</p>
+                  <p className="edu-brand-sub">Empowering Your Learning Journey</p>
                 </div>
-                <button className="chrome-icon-btn" onClick={runSearch} title="Search" aria-label="Search">
-                  🔍
-                </button>
-                <button className="chrome-icon-btn" onClick={handleMicSearch} title="Voice search" aria-label="Voice search">
-                  🎙
-                </button>
               </div>
-              <div className="mt-2 flex items-center justify-between px-1">
-                <p className="chrome-active-url truncate">
-                  Active: <span>{addressHost}</span>
-                </p>
-                <p className="text-[10px] text-white/55">{engineMode === "playwright" ? "Live Chromium" : "Virtual fallback"}</p>
-              </div>
-            </div>
+            </header>
 
-            <div className="rounded-2xl border border-white/20 bg-[#1a1035]/90 p-3 text-white">
-              <div className="mb-2 flex items-center justify-between">
-                <p className="text-sm font-semibold">Cloud Live View (WebSocket)</p>
-                <p className="text-[11px] text-white/70">{liveFrame.url || tabs.find((t) => t.tabId === activeTabId)?.url || "-"}</p>
-              </div>
-              {liveFrame.imageBase64 ? (
-                <img
-                  src={`data:image/jpeg;base64,${liveFrame.imageBase64}`}
-                  alt="Cloud tab frame"
-                  className="h-56 w-full rounded-xl border border-white/15 object-cover"
-                />
-              ) : (
-                <div className="flex h-56 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-xs text-white/70">
-                  Waiting for cloud frame... (Virtual mode streams metadata only)
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-white/30 bg-white/50 p-4 shadow-[0_8px_28px_rgba(2,6,23,0.18)]">
-              <div className="mb-3 flex items-center justify-between">
-                <p className="text-sm font-semibold text-slate-800">Multi-Tab Cloud Session</p>
-                <button className="soft-chip" onClick={loadTabs}>
-                  Refresh Tabs
-                </button>
-              </div>
-              <div className="mb-3 flex flex-wrap gap-2">
-                {tabs.length === 0 && <p className="text-xs text-slate-600">No tabs opened yet.</p>}
-                {tabs.map((tab) => (
-                  <div
-                    key={tab.tabId}
-                    className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
-                      tab.tabId === activeTabId ? "border-cyan-500 bg-cyan-100" : "border-slate-300 bg-white/80"
-                    }`}
-                  >
-                    <button onClick={() => switchTab(tab.tabId)} className="max-w-[180px] truncate">
-                      {tab.title || tab.url}
-                    </button>
-                    <button onClick={() => closeTab(tab.tabId)} className="rounded bg-red-500/80 px-1 text-white">
-                      x
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-2">
+            <section className="edu-search-card">
+              <div className="edu-searchbar">
+                <span className="edu-search-icon">🔎</span>
                 <input
-                  className="soft-field flex-1"
-                  placeholder="Type to search or enter a URL"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") runSearch();
+                  }}
+                  placeholder="Search for courses, topics, or questions..."
                 />
-                <button className="soft-chip" onClick={runSearch}>
-                  {isSearching ? "Searching..." : "Smart Search"}
-                </button>
-                <button className="soft-chip" onClick={openTabFromInput}>
-                  Open Tab
-                </button>
+                <div className="edu-search-actions">
+                  <button className="edu-icon" onClick={loadTabs} title="Refresh cloud tabs" aria-label="Refresh cloud tabs">
+                    ↻
+                  </button>
+                  <button className="edu-icon" onClick={handleHome} title="Home" aria-label="Home">
+                    ⌂
+                  </button>
+                  <button className="edu-icon" onClick={handleMicSearch} title="Voice search" aria-label="Voice search">
+                    🎙
+                  </button>
+                  <button className="edu-primary" onClick={runSearch} disabled={isSearching}>
+                    {isSearching ? "Searching..." : "Search"}
+                  </button>
+                </div>
               </div>
-              <p className="mt-2 text-xs text-slate-600">
-                {isStudent ? "Student restrictions enabled for blocked keywords/domains." : "Normal mode enabled."}
-              </p>
-              <p className="mt-1 text-xs text-cyan-700">{actionStatus}</p>
-              {activeTabId && (
-                <p className="mt-1 text-xs text-slate-700">
-                  Active tab: {tabs.find((tab) => tab.tabId === activeTabId)?.url || "Current tab"}
-                </p>
-              )}
-            </div>
 
-            <div className="rounded-2xl border border-white/20 bg-[#1a1035]/90 p-4 text-white">
-              <p className="mb-3 text-sm font-semibold text-white/85">180 videos</p>
-              <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-1">
-                {appItems.map((app) => (
+              <div className="edu-chips">
+                <p className="edu-chips-label">Popular Searches:</p>
+                {(recentSearches.length > 0
+                  ? recentSearches.slice(0, 4).map((r) => r.query)
+                  : ["Python Programming", "World History", "Data Science", "English Grammar"]
+                ).map((q) => (
                   <button
-                    key={`dot-${app.label}`}
-                    onClick={() => openAppTab(app.url, app.label)}
-                    className="h-9 min-w-9 rounded-full border border-white/25 bg-white/15 px-2 text-[10px] font-semibold text-white/90"
-                    title={app.label}
+                    key={q}
+                    className="edu-chip"
+                    onClick={() => {
+                      setSearch(q);
+                      runSearch();
+                    }}
                   >
-                    {app.label.slice(0, 2)}
+                    {q}
                   </button>
                 ))}
               </div>
-              <p className="mb-3 text-sm font-semibold text-white/85">360 videos</p>
-              <div className="grid gap-3 md:grid-cols-4">
+            </section>
+
+            <section className="edu-section">
+              <div className="edu-section-head">
+                <h3>Trending Courses</h3>
+              </div>
+              <div className="edu-cards">
                 {featuredItems.map((item) => (
                   <button
                     key={item.id}
-                    className="vr-card text-left"
+                    className="edu-course"
                     onClick={() => openResultTab({ title: item.title, url: buildOpenUrlFromInput(item.title), snippet: item.subtitle })}
+                    title="Open in cloud browser"
                   >
-                    <span className="vr-badge">{item.tag}</span>
-                    <p className="mt-8 text-sm font-semibold">{item.title}</p>
-                    <p className="mt-1 text-xs text-white/75">{item.subtitle}</p>
+                    <div className="edu-course-thumb" />
+                    <div className="edu-course-body">
+                      <p className="edu-course-title">{item.title}</p>
+                      <p className="edu-course-sub">{item.subtitle}</p>
+                      <div className="edu-course-meta">
+                        <span>★ 4.8</span>
+                        <span>12k Students</span>
+                      </div>
+                    </div>
                   </button>
                 ))}
               </div>
-            </div>
+            </section>
 
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="soft-panel">
-                <p className="soft-title">Recently</p>
-                <div className="rounded-xl bg-white p-3 text-slate-900">
-                  {recentSearches.length === 0 ? (
-                    <>
-                      <p className="font-semibold">{topSuggestion}</p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {resultItems[0]?.snippet || "Your recent searches will appear here."}
-                      </p>
-                    </>
-                  ) : (
-                    <div className="space-y-2">
-                      {recentSearches.map((entry, idx) => (
-                        <button
-                          key={`${entry.query}-${idx}`}
-                          className="w-full rounded-lg bg-slate-100 px-2 py-2 text-left text-xs"
-                          onClick={() => {
-                            setSearch(entry.query);
-                            setActionStatus(`Loaded recent query: "${entry.query}"`);
-                          }}
-                        >
-                          <p className="font-semibold">{entry.query}</p>
-                          <p className="text-[10px] text-slate-500">{new Date(entry.createdAt).toLocaleString()}</p>
-                        </button>
-                      ))}
+            <section className="edu-section">
+              <div className="edu-section-head">
+                <h3>Recent Search Results</h3>
+              </div>
+              <div className="edu-recent">
+                {(resultItems.length > 0
+                  ? resultItems
+                  : recentSearches.map((r) => ({ title: r.query, url: buildOpenUrlFromInput(r.query), source: "Recent", snippet: "Recent search" }))
+                )
+                  .slice(0, 4)
+                  .map((item) => (
+                    <button key={`${item.url}-${item.title}`} className="edu-recent-item" onClick={() => openResultTab(item)}>
+                      <div className="min-w-0">
+                        <p className="edu-recent-title truncate">{item.title}</p>
+                        <p className="edu-recent-sub truncate">{item.snippet || item.source || "Smart"}</p>
+                      </div>
+                      <span className="edu-badge">{item.source || "Smart"}</span>
+                    </button>
+                  ))}
+              </div>
+            </section>
+
+            <section className="edu-section">
+              <div className="edu-section-head">
+                <h3>Browse Categories</h3>
+              </div>
+              <div className="edu-cats">
+                {[
+                  { label: "Technology", url: "https://www.coursera.org/browse/computer-science" },
+                  { label: "History", url: "https://www.britannica.com/topic/history-of-Europe" },
+                  { label: "Science", url: "https://www.khanacademy.org/science" },
+                  { label: "Languages", url: "https://www.duolingo.com" }
+                ].map((cat) => (
+                  <button key={cat.label} className="edu-cat" onClick={() => openAppTab(cat.url, cat.label)}>
+                    <span className="edu-cat-icon">▦</span>
+                    <span className="edu-cat-label">{cat.label}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="edu-section">
+              <div className="edu-section-head">
+                <h3>Cloud Browser</h3>
+                <p className="edu-note">
+                  {searchMeta.fromCache ? "Loaded from your cached results." : "Live smart results for current query."}{" "}
+                  {isStudent ? "Student restrictions are enforced." : "Normal mode enabled."}
+                </p>
+              </div>
+
+              <div className="edu-cloud-grid">
+                <div className="edu-card">
+                  <div className="edu-card-head">
+                    <p>Cloud Live View</p>
+                    <p className="edu-muted truncate">{liveFrame.url || tabs.find((t) => t.tabId === activeTabId)?.url || "-"}</p>
+                  </div>
+                  <p className="edu-live-hint">
+                    {canInteractLive
+                      ? "Click to interact · scroll wheel · click the stream then type (cloud Chromium)."
+                      : engineMode === "virtual"
+                        ? "Live view needs Playwright Chromium on the server (run: npx playwright install chromium)."
+                        : "Open a tab and wait for the stream…"}
+                  </p>
+                  {liveFrame.imageBase64 ? (
+                    <div
+                      className={`edu-live-wrap ${canInteractLive ? "edu-live-wrap--active" : ""}`}
+                      tabIndex={canInteractLive ? 0 : -1}
+                      onKeyDown={(e) => {
+                        if (!canInteractLive) return;
+                        if (e.ctrlKey || e.metaKey || e.altKey) return;
+                        if (e.key === "Tab") return;
+                        e.preventDefault();
+                        sendBrowserInput({ kind: "keydown", key: e.key });
+                      }}
+                    >
+                      <img
+                        ref={liveViewRef}
+                        src={`data:image/jpeg;base64,${liveFrame.imageBase64}`}
+                        alt="Cloud tab frame"
+                        className="edu-frame edu-frame-interactive"
+                        onClick={(e) => {
+                          if (!canInteractLive) return;
+                          const img = liveViewRef.current;
+                          const pt = mapPointerToViewport(e, img);
+                          if (!pt) return;
+                          sendBrowserInput({ kind: "click", x: pt.x, y: pt.y });
+                        }}
+                        onWheel={(e) => {
+                          if (!canInteractLive) return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          sendBrowserInput({ kind: "wheel", deltaX: e.deltaX, deltaY: e.deltaY });
+                        }}
+                      />
                     </div>
+                  ) : (
+                    <div className="edu-frame-empty">Waiting for cloud frame...</div>
                   )}
+                </div>
+
+                <div className="edu-card">
+                  <div className="edu-card-head">
+                    <p>Tabs</p>
+                    <button className="edu-link" onClick={openTabFromInput} title="Open current input as tab">
+                      Open Tab
+                    </button>
+                  </div>
+                  <div className="edu-tabs">
+                    {tabs.length === 0 ? <p className="edu-muted">No tabs opened yet.</p> : null}
+                    {tabs.slice(0, 8).map((tab) => (
+                      <div key={tab.tabId} className={`edu-tab ${tab.tabId === activeTabId ? "active" : ""}`}>
+                        <button className="edu-tab-btn" onClick={() => switchTab(tab.tabId)} title={tab.url}>
+                          {tab.title || tab.url}
+                        </button>
+                        <button className="edu-x" onClick={() => closeTab(tab.tabId)} aria-label="Close tab" title="Close tab">
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="edu-note">{actionStatus}</p>
                 </div>
               </div>
 
-              <div className="soft-panel">
-                <p className="soft-title">Apps</p>
-                <div className="grid grid-cols-4 gap-2">
-                  {appItems.map((app) => (
-                    <button
-                      key={app.label}
-                      className="rounded-lg bg-white/75 px-2 py-3 text-[11px] text-slate-800"
-                      onClick={() => openAppTab(app.url, app.label)}
-                    >
-                      {app.label}
+              <div className="edu-cloud-grid">
+                <div className="edu-card">
+                  <div className="edu-card-head">
+                    <p>Apps</p>
+                  </div>
+                  <div className="edu-apps">
+                    {appItems.map((app) => (
+                      <button key={app.label} className="edu-app" onClick={() => openAppTab(app.url, app.label)}>
+                        {app.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="edu-card">
+                  <div className="edu-card-head">
+                    <p>Music</p>
+                    <button className="edu-link" onClick={loadSpotifyStatus}>
+                      Refresh
+                    </button>
+                  </div>
+                  <p className="edu-muted">
+                    {spotifyStatus.connected
+                      ? `Spotify Connected${spotifyStatus.displayName ? ` as ${spotifyStatus.displayName}` : ""}`
+                      : "Connect your Spotify account for personalized music access."}
+                  </p>
+                  <div className="edu-row">
+                    {!spotifyStatus.connected ? (
+                      <button className="edu-primary small" onClick={connectSpotify}>
+                        Connect
+                      </button>
+                    ) : (
+                      <button className="edu-btn" onClick={() => openAppTab("https://open.spotify.com", "Spotify")}>
+                        Open Spotify
+                      </button>
+                    )}
+                    <button className="edu-btn" onClick={openTabFromInput}>
+                      Open Tab
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="edu-card">
+                <div className="edu-card-head">
+                  <p>Smart Search Results</p>
+                  {hasMoreResults ? (
+                    <button className="edu-link" onClick={loadMoreResults} disabled={isSearching}>
+                      {isSearching ? "Loading..." : "More Results"}
+                    </button>
+                  ) : (
+                    <span className="edu-muted">{searchMeta.fromCache ? "Cached" : "Live"}</span>
+                  )}
+                </div>
+                <div className="edu-results">
+                  {resultItems.length === 0 ? <p className="edu-muted">Results will appear here after you search.</p> : null}
+                  {resultItems.map((item) => (
+                    <button key={`${item.url}-${item.title}`} className="edu-result" onClick={() => openResultTab(item)}>
+                      <div className="min-w-0">
+                        <p className="edu-result-title truncate">{item.title}</p>
+                        <p className="edu-result-sub line-clamp-2">{item.snippet}</p>
+                        <p className="edu-result-url truncate">{item.url}</p>
+                      </div>
+                      <span className="edu-badge">{item.source || "Smart"}</span>
                     </button>
                   ))}
                 </div>
               </div>
-
-              <div className="soft-panel">
-                <p className="soft-title">Music</p>
-                <div className="rounded-xl bg-gradient-to-br from-slate-800 to-blue-900 p-4 text-sm">
-                  <p className="font-semibold">
-                    {spotifyStatus.connected
-                      ? `Spotify Connected${spotifyStatus.displayName ? ` as ${spotifyStatus.displayName}` : ""}`
-                      : "Connect Spotify"}
-                  </p>
-                  <p className="text-xs text-white/70">
-                    {spotifyStatus.connected
-                      ? "Open Spotify app or reconnect if needed."
-                      : "Connect your Spotify account for personalized music access."}
-                  </p>
-                  <div className="mt-4 flex items-center gap-2 text-xs text-white/80">
-                    {!spotifyStatus.connected ? (
-                      <button className="rounded-full bg-emerald-500 px-3 py-1 font-semibold text-black" onClick={connectSpotify}>
-                        Connect
-                      </button>
-                    ) : (
-                      <button
-                        className="rounded-full bg-white/20 px-2 py-1"
-                        onClick={() => openAppTab("https://open.spotify.com", "Spotify")}
-                      >
-                        Open Spotify
-                      </button>
-                    )}
-                    <button className="rounded-full bg-white/20 px-2 py-1" onClick={loadSpotifyStatus}>
-                      Refresh Status
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="soft-panel">
-              <p className="soft-title">Smart Search Results</p>
-              <p className="mb-2 text-[11px] text-slate-600">
-                {searchMeta.fromCache ? "Loaded from your cached results." : "Live smart results for current query."}
-              </p>
-              <div className="space-y-2">
-                {resultItems.length === 0 && (
-                  <p className="text-xs text-slate-600">Search results will appear here after you click Smart Search.</p>
-                )}
-                {resultItems.map((item) => (
-                  <div key={`${item.url}-${item.title}`} className="rounded-xl border border-slate-300/60 bg-white/80 p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <button className="flex-1 text-left" onClick={() => openResultTab(item)}>
-                        <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                      </button>
-                      <div className="flex items-center gap-1">
-                        <span className="rounded-full bg-cyan-100 px-2 py-1 text-[10px] font-semibold text-cyan-800">
-                          {item.source || "Smart"}
-                        </span>
-                        <button
-                          onClick={() => openResultTab(item)}
-                          className="rounded-full border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                          title="Open in cloud browser"
-                        >
-                          ↗
-                        </button>
-                      </div>
-                    </div>
-                    <p className="mt-1 text-xs text-slate-600">{item.snippet}</p>
-                    <p className="mt-1 text-[11px] text-cyan-700">{item.url}</p>
-                  </div>
-                ))}
-              </div>
-              {hasMoreResults && (
-                <div className="mt-3">
-                  <button
-                    className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white"
-                    onClick={loadMoreResults}
-                    disabled={isSearching}
-                  >
-                    {isSearching ? "Loading..." : "More Results"}
-                  </button>
-                </div>
-              )}
-            </div>
-
-          </section>
+            </section>
+          </main>
         </div>
       </div>
     </AppLayout>
