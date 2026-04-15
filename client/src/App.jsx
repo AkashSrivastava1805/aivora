@@ -6,6 +6,7 @@ import ParentDashboard from "./pages/ParentDashboard";
 import RoleSelectionPage from "./pages/RoleSelectionPage";
 import SettingsPage from "./pages/SettingsPage";
 import StudentDashboard from "./pages/StudentDashboard";
+import AiTutorPage from "./pages/AiTutorPage";
 import api, { bindApiAuth, setAuthToken } from "./services/api";
 import { socket } from "./services/socket";
 
@@ -193,6 +194,10 @@ export default function App() {
               <Navigate to="/" replace />
             )
           }
+        />
+        <Route
+          path="/ai-tutor"
+          element={session?.user?.role ? <AiTutorPage /> : <Navigate to="/" replace />}
         />
         <Route
           path="/settings"

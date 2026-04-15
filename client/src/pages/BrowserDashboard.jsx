@@ -29,6 +29,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   const [heartbeat, setHeartbeat] = useState("");
   const [weather, setWeather] = useState({ label: "Locating...", temp: "--", wind: "--" });
   const [recentSearches, setRecentSearches] = useState([]);
+  const [recentOpen, setRecentOpen] = useState(false);
   const [spotifyStatus, setSpotifyStatus] = useState({ connected: false, displayName: "" });
   const [actionStatus, setActionStatus] = useState("");
   const [tabs, setTabs] = useState([]);
@@ -65,7 +66,11 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   }
 
   function bumpLiveFrame() {
-    if (socket.connected) socket.emit("request-tab-frame");
+    if (!socket.connected) {
+      socket.connect();
+      return;
+    }
+    socket.emit("request-tab-frame");
   }
 
   function sendBrowserInput(input) {
@@ -193,12 +198,42 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     return `https://www.bing.com/search?q=${encodeURIComponent(input)}`;
   }
 
+  async function navigateFromInput() {
+    try {
+      setWarning("");
+      const trimmed = search.trim();
+      if (!trimmed) return;
+      const resolvedUrl = buildOpenUrlFromInput(trimmed);
+      const { data } = await api.post("/browser/navigate-active", { url: resolvedUrl });
+      setTabs(data.tabs || []);
+      setActiveTabId(data.activeTabId || null);
+      setActionStatus(`Opened in app: ${resolvedUrl}`);
+      bumpLiveFrame();
+    } catch (error) {
+      if (error.response?.status === 403) setWarning(error.response?.data?.message || "Website blocked");
+      else setActionStatus("Unable to open website in app.");
+    }
+  }
+
   async function runSearch() {
     try {
       setWarning("");
       setIsSearching(true);
       const trimmed = search.trim();
       if (!trimmed) return;
+
+      // If user typed a domain/URL, open it directly inside the app (cloud tab).
+      if (looksLikeDomainOrUrl(trimmed)) {
+        setActionStatus(`Opening website in app: ${buildOpenUrlFromInput(trimmed)}`);
+        await navigateFromInput();
+        setResultItems([]);
+        setHasMoreResults(false);
+        setSearchPage(1);
+        setActiveQuery("");
+        setSearchMeta({ fromCache: false });
+        return;
+      }
+
       const { data } = await api.post("/browser/search", { query: trimmed, page: 1, limit: 6 });
       setResultItems(data.results || []);
       setHasMoreResults(Boolean(data.hasMore));
@@ -299,8 +334,13 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   async function openResultTab(item) {
     try {
       setWarning("");
-      const { data } = await api.post("/browser/navigate-active", { url: item.url });
-      setActionStatus(`Opened in current tab: ${item.title}`);
+      const targetUrl = item?.url || buildOpenUrlFromInput(item?.title || "");
+      if (!targetUrl) {
+        setActionStatus("Unable to open result (missing URL).");
+        return;
+      }
+      const { data } = await api.post("/browser/navigate-active", { url: targetUrl });
+      setActionStatus(`Opened in app: ${item?.title || targetUrl}`);
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
       bumpLiveFrame();
@@ -463,7 +503,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
               <button
                 className="edu-primary"
                 onClick={() => {
-                  window.open("https://aivorachatfrontend.vercel.app/", "_blank", "noopener,noreferrer");
+                  navigate("/ai-tutor");
                 }}
               >
                 Ai tutor
@@ -518,69 +558,67 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
             </section>
 
             <section className="edu-section">
-              <div className="edu-section-head">
-                <h3>Trending Courses</h3>
-              </div>
-              <div className="edu-cards">
-                {featuredItems.map((item) => (
-                  <button
-                    key={item.id}
-                    className="edu-course"
-                    onClick={() => openResultTab({ title: item.title, url: buildOpenUrlFromInput(item.title), snippet: item.subtitle })}
-                    title="Open in cloud browser"
-                  >
-                    <div className="edu-course-thumb" />
-                    <div className="edu-course-body">
-                      <p className="edu-course-title">{item.title}</p>
-                      <p className="edu-course-sub">{item.subtitle}</p>
-                      <div className="edu-course-meta">
-                        <span>★ 4.8</span>
-                        <span>12k Students</span>
-                      </div>
-                    </div>
-                  </button>
-                ))}
+              <div className="edu-collapse">
+                <button
+                  className="edu-collapse-head"
+                  onClick={() => setRecentOpen((v) => !v)}
+                  aria-expanded={recentOpen}
+                >
+                  <h3>Recent Search Results</h3>
+                  <span className={`edu-collapse-arrow ${recentOpen ? "open" : ""}`}>▾</span>
+                </button>
+
+                {recentOpen && (
+                  <div className="edu-recent edu-collapse-body">
+                    {(resultItems.length > 0
+                      ? resultItems
+                      : recentSearches.map((r) => ({
+                          title: r.query,
+                          url: buildOpenUrlFromInput(r.query),
+                          source: "Recent",
+                          snippet: "Recent search"
+                        }))
+                    )
+                      .slice(0, 4)
+                      .map((item) => (
+                        <button key={`${item.url}-${item.title}`} className="edu-recent-item" onClick={() => openResultTab(item)}>
+                          <div className="min-w-0">
+                            <p className="edu-recent-title truncate">{item.title}</p>
+                            <p className="edu-recent-sub truncate">{item.snippet || item.source || "Smart"}</p>
+                          </div>
+                          <span className="edu-badge">{item.source || "Smart"}</span>
+                        </button>
+                      ))}
+                  </div>
+                )}
               </div>
             </section>
 
             <section className="edu-section">
-              <div className="edu-section-head">
-                <h3>Recent Search Results</h3>
-              </div>
-              <div className="edu-recent">
-                {(resultItems.length > 0
-                  ? resultItems
-                  : recentSearches.map((r) => ({ title: r.query, url: buildOpenUrlFromInput(r.query), source: "Recent", snippet: "Recent search" }))
-                )
-                  .slice(0, 4)
-                  .map((item) => (
-                    <button key={`${item.url}-${item.title}`} className="edu-recent-item" onClick={() => openResultTab(item)}>
+              <div className="edu-card">
+                <div className="edu-card-head">
+                  <p>Smart Search Results</p>
+                  {hasMoreResults ? (
+                    <button className="edu-link" onClick={loadMoreResults} disabled={isSearching}>
+                      {isSearching ? "Loading..." : "More Results"}
+                    </button>
+                  ) : (
+                    <span className="edu-muted">{searchMeta.fromCache ? "Cached" : "Live"}</span>
+                  )}
+                </div>
+                <div className="edu-results">
+                  {resultItems.length === 0 ? <p className="edu-muted">Results will appear here after you search.</p> : null}
+                  {resultItems.map((item) => (
+                    <button key={`${item.url}-${item.title}`} className="edu-result" onClick={() => openResultTab(item)}>
                       <div className="min-w-0">
-                        <p className="edu-recent-title truncate">{item.title}</p>
-                        <p className="edu-recent-sub truncate">{item.snippet || item.source || "Smart"}</p>
+                        <p className="edu-result-title truncate">{item.title}</p>
+                        <p className="edu-result-sub line-clamp-2">{item.snippet}</p>
+                        <p className="edu-result-url truncate">{item.url}</p>
                       </div>
                       <span className="edu-badge">{item.source || "Smart"}</span>
                     </button>
                   ))}
-              </div>
-            </section>
-
-            <section className="edu-section">
-              <div className="edu-section-head">
-                <h3>Browse Categories</h3>
-              </div>
-              <div className="edu-cats">
-                {[
-                  { label: "Technology", url: "https://www.coursera.org/browse/computer-science" },
-                  { label: "History", url: "https://www.britannica.com/topic/history-of-Europe" },
-                  { label: "Science", url: "https://www.khanacademy.org/science" },
-                  { label: "Languages", url: "https://www.duolingo.com" }
-                ].map((cat) => (
-                  <button key={cat.label} className="edu-cat" onClick={() => openAppTab(cat.url, cat.label)}>
-                    <span className="edu-cat-icon">▦</span>
-                    <span className="edu-cat-label">{cat.label}</span>
-                  </button>
-                ))}
+                </div>
               </div>
             </section>
 
@@ -707,32 +745,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                       Open Tab
                     </button>
                   </div>
-                </div>
-              </div>
-
-              <div className="edu-card">
-                <div className="edu-card-head">
-                  <p>Smart Search Results</p>
-                  {hasMoreResults ? (
-                    <button className="edu-link" onClick={loadMoreResults} disabled={isSearching}>
-                      {isSearching ? "Loading..." : "More Results"}
-                    </button>
-                  ) : (
-                    <span className="edu-muted">{searchMeta.fromCache ? "Cached" : "Live"}</span>
-                  )}
-                </div>
-                <div className="edu-results">
-                  {resultItems.length === 0 ? <p className="edu-muted">Results will appear here after you search.</p> : null}
-                  {resultItems.map((item) => (
-                    <button key={`${item.url}-${item.title}`} className="edu-result" onClick={() => openResultTab(item)}>
-                      <div className="min-w-0">
-                        <p className="edu-result-title truncate">{item.title}</p>
-                        <p className="edu-result-sub line-clamp-2">{item.snippet}</p>
-                        <p className="edu-result-url truncate">{item.url}</p>
-                      </div>
-                      <span className="edu-badge">{item.source || "Smart"}</span>
-                    </button>
-                  ))}
                 </div>
               </div>
             </section>
