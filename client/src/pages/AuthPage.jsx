@@ -52,6 +52,14 @@ export default function AuthPage({ setSession }) {
 
   return (
     <AppLayout title={title}>
+      <div className="mb-3">
+        <button
+          className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/20"
+          onClick={() => navigate(-1)}
+        >
+          ← Back
+        </button>
+      </div>
       <div className="grid gap-5 lg:grid-cols-[1.2fr_1.6fr]">
         <GlassCard className="space-y-4 auth-shell glass-animated">
           <p className="text-xs uppercase tracking-[0.22em] text-neon-cyan">Role Session</p>

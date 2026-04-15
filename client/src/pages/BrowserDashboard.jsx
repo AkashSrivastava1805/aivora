@@ -30,6 +30,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   const [weather, setWeather] = useState({ label: "Locating...", temp: "--", wind: "--" });
   const [recentSearches, setRecentSearches] = useState([]);
   const [recentOpen, setRecentOpen] = useState(false);
+  const [isFullScreenView, setIsFullScreenView] = useState(false);
   const [spotifyStatus, setSpotifyStatus] = useState({ connected: false, displayName: "" });
   const [actionStatus, setActionStatus] = useState("");
   const [tabs, setTabs] = useState([]);
@@ -204,7 +205,19 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       const trimmed = search.trim();
       if (!trimmed) return;
       const resolvedUrl = buildOpenUrlFromInput(trimmed);
-      const { data } = await api.post("/browser/navigate-active", { url: resolvedUrl });
+      let data;
+      try {
+        const resp = await api.post("/browser/navigate-active", { url: resolvedUrl });
+        data = resp.data;
+      } catch (error) {
+        if (error.response?.status === 404) {
+          // Fallback for older backend versions that don't expose /navigate-active yet.
+          const fallbackResp = await api.post("/browser/open-tab", { url: resolvedUrl });
+          data = fallbackResp.data;
+        } else {
+          throw error;
+        }
+      }
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
       setActionStatus(`Opened in app: ${resolvedUrl}`);
@@ -331,7 +344,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     }
   }
 
-  async function openResultTab(item) {
+  async function openResultTab(item, options = {}) {
     try {
       setWarning("");
       const targetUrl = item?.url || buildOpenUrlFromInput(item?.title || "");
@@ -339,10 +352,25 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
         setActionStatus("Unable to open result (missing URL).");
         return;
       }
-      const { data } = await api.post("/browser/navigate-active", { url: targetUrl });
+      let data;
+      try {
+        const resp = await api.post("/browser/navigate-active", { url: targetUrl });
+        data = resp.data;
+      } catch (error) {
+        if (error.response?.status === 404) {
+          // Fallback for older backend versions that don't expose /navigate-active yet.
+          const fallbackResp = await api.post("/browser/open-tab", { url: targetUrl });
+          data = fallbackResp.data;
+        } else {
+          throw error;
+        }
+      }
       setActionStatus(`Opened in app: ${item?.title || targetUrl}`);
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
+      if (options.fullScreen) {
+        setIsFullScreenView(true);
+      }
       bumpLiveFrame();
     } catch (error) {
       if (error.response?.status === 403) {
@@ -445,6 +473,54 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   return (
     <AppLayout title={`${isStudent ? "Student" : "Normal User"} Cloud Browser`}>
       <WarningOverlay message={warning} onClose={() => setWarning("")} />
+
+      {isFullScreenView && (
+        <div className="edu-fullscreen">
+          <div className="edu-fullscreen-topbar">
+            <button className="edu-fullscreen-back" onClick={() => setIsFullScreenView(false)}>
+              ← Back
+            </button>
+            <p className="edu-fullscreen-url">{liveFrame.url || tabs.find((t) => t.tabId === activeTabId)?.url || "-"}</p>
+            <div />
+          </div>
+
+          <div
+            className={`edu-fullscreen-stage ${canInteractLive ? "edu-live-wrap--active" : ""}`}
+            tabIndex={canInteractLive ? 0 : -1}
+            onKeyDown={(e) => {
+              if (!canInteractLive) return;
+              if (e.ctrlKey || e.metaKey || e.altKey) return;
+              if (e.key === "Tab") return;
+              e.preventDefault();
+              sendBrowserInput({ kind: "keydown", key: e.key });
+            }}
+          >
+            {liveFrame.imageBase64 ? (
+              <img
+                ref={liveViewRef}
+                src={`data:image/jpeg;base64,${liveFrame.imageBase64}`}
+                alt="Cloud tab frame fullscreen"
+                className="edu-fullscreen-frame"
+                onClick={(e) => {
+                  if (!canInteractLive) return;
+                  const img = liveViewRef.current;
+                  const pt = mapPointerToViewport(e, img);
+                  if (!pt) return;
+                  sendBrowserInput({ kind: "click", x: pt.x, y: pt.y });
+                }}
+                onWheel={(e) => {
+                  if (!canInteractLive) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  sendBrowserInput({ kind: "wheel", deltaX: e.deltaX, deltaY: e.deltaY });
+                }}
+              />
+            ) : (
+              <div className="edu-fullscreen-empty">Loading cloud page...</div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="edu-shell">
         <div className="edu-grid">
@@ -609,13 +685,30 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                 <div className="edu-results">
                   {resultItems.length === 0 ? <p className="edu-muted">Results will appear here after you search.</p> : null}
                   {resultItems.map((item) => (
-                    <button key={`${item.url}-${item.title}`} className="edu-result" onClick={() => openResultTab(item)}>
+                    <button
+                      key={`${item.url}-${item.title}`}
+                      className="edu-result"
+                      onClick={() => openResultTab(item, { fullScreen: true })}
+                    >
                       <div className="min-w-0">
                         <p className="edu-result-title truncate">{item.title}</p>
                         <p className="edu-result-sub line-clamp-2">{item.snippet}</p>
                         <p className="edu-result-url truncate">{item.url}</p>
                       </div>
-                      <span className="edu-badge">{item.source || "Smart"}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="edu-badge">{item.source || "Smart"}</span>
+                        <button
+                          type="button"
+                          className="edu-redirect-btn"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openResultTab(item, { fullScreen: true });
+                          }}
+                        >
+                          Redirect
+                        </button>
+                      </div>
                     </button>
                   ))}
                 </div>
