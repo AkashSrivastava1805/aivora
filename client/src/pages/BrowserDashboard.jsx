@@ -299,8 +299,8 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   async function openResultTab(item) {
     try {
       setWarning("");
-      const { data } = await api.post("/browser/open-tab", { url: item.url });
-      setActionStatus(`Opened result: ${item.title}`);
+      const { data } = await api.post("/browser/navigate-active", { url: item.url });
+      setActionStatus(`Opened in current tab: ${item.title}`);
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
       bumpLiveFrame();
@@ -460,6 +460,14 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                   <p className="edu-brand-sub">Empowering Your Learning Journey</p>
                 </div>
               </div>
+              <button
+                className="edu-primary"
+                onClick={() => {
+                  window.open("https://aivorachatfrontend.vercel.app/", "_blank", "noopener,noreferrer");
+                }}
+              >
+                Ai tutor
+              </button>
             </header>
 
             <section className="edu-search-card">
