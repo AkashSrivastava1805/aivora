@@ -24,12 +24,28 @@ export default function AiTutorPage() {
 
     const onReady = () => setLoaded(true);
     const onFail = () => setFailed(true);
+    const onNavigate = () => {
+      setLoaded(true);
+      setFailed(false);
+    };
+    const onNewWindow = (event) => {
+      // Force target=_blank/window.open navigations to stay inside the same webview.
+      if (event?.preventDefault) event.preventDefault();
+      const nextUrl = event?.url;
+      if (nextUrl && node?.loadURL) node.loadURL(nextUrl);
+    };
 
     node.addEventListener("dom-ready", onReady);
     node.addEventListener("did-fail-load", onFail);
+    node.addEventListener("did-navigate", onNavigate);
+    node.addEventListener("did-navigate-in-page", onNavigate);
+    node.addEventListener("new-window", onNewWindow);
     return () => {
       node.removeEventListener("dom-ready", onReady);
       node.removeEventListener("did-fail-load", onFail);
+      node.removeEventListener("did-navigate", onNavigate);
+      node.removeEventListener("did-navigate-in-page", onNavigate);
+      node.removeEventListener("new-window", onNewWindow);
     };
   }, [isElectron, src]);
 
@@ -63,7 +79,7 @@ export default function AiTutorPage() {
             ref={webviewRef}
             className="ai-tutor-frame"
             src={src}
-            allowpopups="true"
+            allowpopups="false"
           />
         ) : (
           <iframe

@@ -368,3 +368,8 @@ export async function getEngineStatusController(req, res, next) {
     next(error);
   }
 }
+
+export async function validateUrlController(req, res) {
+  // If this controller executes, restriction middleware allowed the request.
+  return res.json({ allowed: true });
+}

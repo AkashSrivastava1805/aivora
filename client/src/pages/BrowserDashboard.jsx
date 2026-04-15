@@ -187,6 +187,10 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
         setActionStatus("Unable to open result (missing URL).");
         return;
       }
+      await api.post("/browser/validate-url", {
+        url: targetUrl,
+        query: item?.title || ""
+      });
       navigate(`/in-app-page?title=${encodeURIComponent(item?.title || "Redirect")}&url=${encodeURIComponent(targetUrl)}`);
     } catch (error) {
       if (error.response?.status === 403) {
@@ -470,11 +474,22 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                         <button
                           type="button"
                           className="edu-redirect-btn"
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.preventDefault();
                             e.stopPropagation();
                             const targetUrl = item?.url || buildOpenUrlFromInput(item?.title || "");
                             if (targetUrl) {
+                              try {
+                                await api.post("/browser/validate-url", {
+                                  url: targetUrl,
+                                  query: item?.title || ""
+                                });
+                              } catch (error) {
+                                if (error.response?.status === 403) {
+                                  setWarning(error.response?.data?.message || "This result is blocked by policy.");
+                                  return;
+                                }
+                              }
                               navigate(
                                 `/in-app-page?title=${encodeURIComponent(item?.title || "Redirect")}&url=${encodeURIComponent(
                                   targetUrl
