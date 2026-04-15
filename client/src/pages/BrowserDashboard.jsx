@@ -30,7 +30,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   const [weather, setWeather] = useState({ label: "Locating...", temp: "--", wind: "--" });
   const [recentSearches, setRecentSearches] = useState([]);
   const [recentOpen, setRecentOpen] = useState(false);
-  const [isFullScreenView, setIsFullScreenView] = useState(false);
   const [spotifyStatus, setSpotifyStatus] = useState({ connected: false, displayName: "" });
   const [actionStatus, setActionStatus] = useState("");
   const [tabs, setTabs] = useState([]);
@@ -172,16 +171,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   }, []);
 
   const topSuggestion = useMemo(() => resultItems[0]?.title || "Google News - Daily Headlines", [resultItems]);
-  const activeTabUrl = useMemo(() => tabs.find((tab) => tab.tabId === activeTabId)?.url || "", [tabs, activeTabId]);
-  const addressValue = search || liveFrame.url || activeTabUrl || "Search in cloud browser";
-  const addressHost = useMemo(() => {
-    try {
-      const parsed = new URL(addressValue.startsWith("http") ? addressValue : `https://${addressValue}`);
-      return parsed.hostname.replace(/^www\./, "");
-    } catch (_error) {
-      return addressValue;
-    }
-  }, [addressValue]);
 
   function looksLikeDomainOrUrl(value) {
     const input = value.trim().toLowerCase();
@@ -234,23 +223,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setIsSearching(true);
       const trimmed = search.trim();
       if (!trimmed) return;
-
-      // If user typed a domain/URL, open it directly inside the app (cloud tab).
-      if (looksLikeDomainOrUrl(trimmed)) {
-        setActionStatus(`Opening website in app: ${buildOpenUrlFromInput(trimmed)}`);
-        await navigateFromInput(trimmed);
-        setResultItems([]);
-        setHasMoreResults(false);
-        setSearchPage(1);
-        setActiveQuery("");
-        setSearchMeta({ fromCache: false });
-        return;
-      }
-
-      // Perceived speed: open search engine results in cloud view immediately.
-      await navigateFromInput(trimmed);
-      setActionStatus(`Searching smart results for "${trimmed}"...`);
-
       const { data } = await api.post("/browser/search", { query: trimmed, page: 1, limit: 6 }, { timeout: 15000 });
       setResultItems(data.results || []);
       setHasMoreResults(Boolean(data.hasMore));
@@ -348,7 +320,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     }
   }
 
-  async function openResultTab(item, options = {}) {
+  async function openResultTab(item) {
     try {
       setWarning("");
       const targetUrl = item?.url || buildOpenUrlFromInput(item?.title || "");
@@ -356,29 +328,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
         setActionStatus("Unable to open result (missing URL).");
         return;
       }
-      let data;
-      try {
-        const resp = await api.post("/browser/navigate-active", { url: targetUrl });
-        data = resp.data;
-      } catch (error) {
-        if (error.response?.status === 404) {
-          // Fallback for older backend versions that don't expose /navigate-active yet.
-          const fallbackResp = await api.post("/browser/open-tab", { url: targetUrl });
-          data = fallbackResp.data;
-        } else {
-          throw error;
-        }
-      }
-      setActionStatus(`Opened in app: ${item?.title || targetUrl}`);
-      setTabs(data.tabs || []);
-      setActiveTabId(data.activeTabId || null);
-      if (data.navigationWarning) {
-        setActionStatus(data.navigationWarning);
-      }
-      if (options.fullScreen) {
-        setIsFullScreenView(true);
-      }
-      bumpLiveFrame();
+      navigate(`/in-app-page?title=${encodeURIComponent(item?.title || "Redirect")}&url=${encodeURIComponent(targetUrl)}`);
     } catch (error) {
       if (error.response?.status === 403) {
         setWarning(error.response?.data?.message || "This result is blocked by policy.");
@@ -475,59 +425,9 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     }
   }
 
-  const canInteractLive = Boolean(liveFrame.imageBase64 && liveFrame.viewportWidth);
-
   return (
     <AppLayout title={`${isStudent ? "Student" : "Normal User"} Cloud Browser`}>
       <WarningOverlay message={warning} onClose={() => setWarning("")} />
-
-      {isFullScreenView && (
-        <div className="edu-fullscreen">
-          <div className="edu-fullscreen-topbar">
-            <button className="edu-fullscreen-back" onClick={() => setIsFullScreenView(false)}>
-              ← Back
-            </button>
-            <p className="edu-fullscreen-url">{liveFrame.url || tabs.find((t) => t.tabId === activeTabId)?.url || "-"}</p>
-            <div />
-          </div>
-
-          <div
-            className={`edu-fullscreen-stage ${canInteractLive ? "edu-live-wrap--active" : ""}`}
-            tabIndex={canInteractLive ? 0 : -1}
-            onKeyDown={(e) => {
-              if (!canInteractLive) return;
-              if (e.ctrlKey || e.metaKey || e.altKey) return;
-              if (e.key === "Tab") return;
-              e.preventDefault();
-              sendBrowserInput({ kind: "keydown", key: e.key });
-            }}
-          >
-            {liveFrame.imageBase64 ? (
-              <img
-                ref={liveViewRef}
-                src={`data:image/jpeg;base64,${liveFrame.imageBase64}`}
-                alt="Cloud tab frame fullscreen"
-                className="edu-fullscreen-frame"
-                onClick={(e) => {
-                  if (!canInteractLive) return;
-                  const img = liveViewRef.current;
-                  const pt = mapPointerToViewport(e, img);
-                  if (!pt) return;
-                  sendBrowserInput({ kind: "click", x: pt.x, y: pt.y });
-                }}
-                onWheel={(e) => {
-                  if (!canInteractLive) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  sendBrowserInput({ kind: "wheel", deltaX: e.deltaX, deltaY: e.deltaY });
-                }}
-              />
-            ) : (
-              <div className="edu-fullscreen-empty">Loading cloud page...</div>
-            )}
-          </div>
-        </div>
-      )}
 
       <div className="edu-shell">
         <div className="edu-grid">
@@ -695,13 +595,13 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                     <div
                       key={`${item.url}-${item.title}`}
                       className="edu-result"
-                      onClick={() => openResultTab(item, { fullScreen: true })}
+                      onClick={() => openResultTab(item)}
                       role="button"
                       tabIndex={0}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          openResultTab(item, { fullScreen: true });
+                          openResultTab(item);
                         }
                       }}
                     >
@@ -720,7 +620,11 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                             e.stopPropagation();
                             const targetUrl = item?.url || buildOpenUrlFromInput(item?.title || "");
                             if (targetUrl) {
-                              window.open(targetUrl, "_blank", "noopener,noreferrer");
+                              navigate(
+                                `/in-app-page?title=${encodeURIComponent(item?.title || "Redirect")}&url=${encodeURIComponent(
+                                  targetUrl
+                                )}`
+                              );
                             }
                           }}
                         >
@@ -742,57 +646,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                 </p>
               </div>
 
-              <div className="edu-cloud-grid">
-                <div className="edu-card">
-                  <div className="edu-card-head">
-                    <p>Cloud Live View</p>
-                    <p className="edu-muted truncate">{liveFrame.url || tabs.find((t) => t.tabId === activeTabId)?.url || "-"}</p>
-                  </div>
-                  <p className="edu-live-hint">
-                    {canInteractLive
-                      ? "Click to interact · scroll wheel · click the stream then type (cloud Chromium)."
-                      : engineMode === "virtual"
-                        ? "Live view needs Playwright Chromium on the server (run: npx playwright install chromium)."
-                        : "Open a tab and wait for the stream…"}
-                  </p>
-                  {liveFrame.imageBase64 ? (
-                    <div
-                      className={`edu-live-wrap ${canInteractLive ? "edu-live-wrap--active" : ""}`}
-                      tabIndex={canInteractLive ? 0 : -1}
-                      onKeyDown={(e) => {
-                        if (!canInteractLive) return;
-                        if (e.ctrlKey || e.metaKey || e.altKey) return;
-                        if (e.key === "Tab") return;
-                        e.preventDefault();
-                        sendBrowserInput({ kind: "keydown", key: e.key });
-                      }}
-                    >
-                      <img
-                        ref={liveViewRef}
-                        src={`data:image/jpeg;base64,${liveFrame.imageBase64}`}
-                        alt="Cloud tab frame"
-                        className="edu-frame edu-frame-interactive"
-                        onClick={(e) => {
-                          if (!canInteractLive) return;
-                          const img = liveViewRef.current;
-                          const pt = mapPointerToViewport(e, img);
-                          if (!pt) return;
-                          sendBrowserInput({ kind: "click", x: pt.x, y: pt.y });
-                        }}
-                        onWheel={(e) => {
-                          if (!canInteractLive) return;
-                          e.preventDefault();
-                          e.stopPropagation();
-                          sendBrowserInput({ kind: "wheel", deltaX: e.deltaX, deltaY: e.deltaY });
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <div className="edu-frame-empty">Waiting for cloud frame...</div>
-                  )}
-                </div>
-
-                <div className="edu-card">
+              <div className="edu-card">
                   <div className="edu-card-head">
                     <p>Tabs</p>
                     <button className="edu-link" onClick={openTabFromInput} title="Open current input as tab">
@@ -814,50 +668,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                   </div>
                   <p className="edu-note">{actionStatus}</p>
                 </div>
-              </div>
 
-              <div className="edu-cloud-grid">
-                <div className="edu-card">
-                  <div className="edu-card-head">
-                    <p>Apps</p>
-                  </div>
-                  <div className="edu-apps">
-                    {appItems.map((app) => (
-                      <button key={app.label} className="edu-app" onClick={() => openAppTab(app.url, app.label)}>
-                        {app.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="edu-card">
-                  <div className="edu-card-head">
-                    <p>Music</p>
-                    <button className="edu-link" onClick={loadSpotifyStatus}>
-                      Refresh
-                    </button>
-                  </div>
-                  <p className="edu-muted">
-                    {spotifyStatus.connected
-                      ? `Spotify Connected${spotifyStatus.displayName ? ` as ${spotifyStatus.displayName}` : ""}`
-                      : "Connect your Spotify account for personalized music access."}
-                  </p>
-                  <div className="edu-row">
-                    {!spotifyStatus.connected ? (
-                      <button className="edu-primary small" onClick={connectSpotify}>
-                        Connect
-                      </button>
-                    ) : (
-                      <button className="edu-btn" onClick={() => openAppTab("https://open.spotify.com", "Spotify")}>
-                        Open Spotify
-                      </button>
-                    )}
-                    <button className="edu-btn" onClick={openTabFromInput}>
-                      Open Tab
-                    </button>
-                  </div>
-                </div>
-              </div>
             </section>
           </main>
         </div>

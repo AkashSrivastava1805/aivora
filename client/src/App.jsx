@@ -200,6 +200,10 @@ export default function App() {
           element={session?.user?.role ? <AiTutorPage /> : <Navigate to="/" replace />}
         />
         <Route
+          path="/in-app-page"
+          element={session?.user?.role ? <AiTutorPage /> : <Navigate to="/" replace />}
+        />
+        <Route
           path="/settings"
           element={
             session?.user?.role ? (

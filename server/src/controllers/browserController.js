@@ -89,7 +89,7 @@ export async function navigateActiveTabController(req, res, next) {
       return res.status(400).json({ message: "URL is required" });
     }
 
-    const { tab, createdNewTab } = await navigateActiveTab(String(req.user._id), url);
+    const { tab, createdNewTab, timedOut } = await navigateActiveTab(String(req.user._id), url);
 
     const currentSession = await BrowserSession.findOne({ userId: req.user._id });
     const existingTabs = currentSession?.tabs?.map((t) => t.toObject()) || [];
@@ -135,7 +135,10 @@ export async function navigateActiveTabController(req, res, next) {
       tab,
       tabs: session.tabs,
       activeTabId: nextActiveTabId,
-      aiActions: analyzeTabs(session.tabs)
+      aiActions: analyzeTabs(session.tabs),
+      navigationWarning: timedOut
+        ? "Destination is slow to respond. Opened anyway; content may continue loading."
+        : null
     });
   } catch (error) {
     if (String(error?.message || "").includes("Executable doesn't exist")) {

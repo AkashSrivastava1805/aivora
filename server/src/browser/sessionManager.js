@@ -37,6 +37,31 @@ function inferTitleFromUrl(url) {
   }
 }
 
+function isNavigationTimeout(error) {
+  return String(error?.name || "").includes("TimeoutError") || String(error?.message || "").includes("Timeout");
+}
+
+async function gotoWithFallback(page, url) {
+  // Fast path for normal pages.
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 12000 });
+    return { timedOut: false };
+  } catch (error) {
+    if (!isNavigationTimeout(error)) throw error;
+  }
+
+  // Slow/heavy pages: try commit-level navigation quickly.
+  try {
+    await page.goto(url, { waitUntil: "commit", timeout: 4000 });
+    return { timedOut: true };
+  } catch (error) {
+    if (!isNavigationTimeout(error)) throw error;
+  }
+
+  // Last resort: don't fail the request; keep metadata so UI can proceed.
+  return { timedOut: true };
+}
+
 async function getBrowser() {
   if (!browserState.browser) {
     try {
@@ -144,13 +169,13 @@ export async function navigateActiveTab(userId, url) {
   if (!active.page) {
     active.url = resolved;
     active.title = inferTitleFromUrl(resolved);
-    return { tab: active, session, createdNewTab: false };
+    return { tab: active, session, createdNewTab: false, timedOut: false };
   }
 
-  await active.page.goto(resolved, { waitUntil: "domcontentloaded", timeout: 20000 });
-  active.url = active.page.url();
-  active.title = await active.page.title();
-  return { tab: active, session, createdNewTab: false };
+  const nav = await gotoWithFallback(active.page, resolved);
+  active.url = active.page.url() || resolved;
+  active.title = (await active.page.title().catch(() => "")) || inferTitleFromUrl(active.url || resolved);
+  return { tab: active, session, createdNewTab: false, timedOut: Boolean(nav.timedOut) };
 }
 
 export async function closeTab(userId, tabId) {
