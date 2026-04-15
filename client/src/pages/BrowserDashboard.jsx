@@ -85,6 +85,13 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     return `https://www.bing.com/search?q=${encodeURIComponent(input)}`;
   }
 
+  function buildResultTargetUrl(item) {
+    const raw = String(item?.url || "").trim();
+    if (!raw) return "";
+    if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+    return `https://${raw}`;
+  }
+
   async function navigateFromInput(rawInput = search) {
     try {
       setWarning("");
@@ -182,7 +189,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   async function openResultTab(item) {
     try {
       setWarning("");
-      const targetUrl = item?.url || buildOpenUrlFromInput(item?.title || "");
+      const targetUrl = buildResultTargetUrl(item);
       if (!targetUrl) {
         setActionStatus("Unable to open result (missing URL).");
         return;
@@ -477,7 +484,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                           onClick={async (e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            const targetUrl = item?.url || buildOpenUrlFromInput(item?.title || "");
+                            const targetUrl = buildResultTargetUrl(item);
                             if (targetUrl) {
                               try {
                                 await api.post("/browser/validate-url", {

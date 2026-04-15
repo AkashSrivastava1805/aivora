@@ -1,4 +1,4 @@
-import { BrowserWindow, app, Menu, ipcMain, shell } from "electron";
+import { BrowserWindow, app, Menu } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,9 +22,8 @@ function createWindow() {
     }
   });
 
-  // Open external links in the user's default browser (not inside Electron).
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+  // Strict in-app mode: block all top-level external window launches.
+  mainWindow.webContents.setWindowOpenHandler(() => {
     return { action: "deny" };
   });
 
@@ -39,10 +38,14 @@ function createWindow() {
   mainWindow.loadFile(indexPath);
 }
 
-ipcMain.handle("aivora:openExternal", async (_event, url) => {
-  if (!url) return false;
-  await shell.openExternal(String(url));
-  return true;
-});
-
 app.whenReady().then(createWindow);
+
+// Keep all webview popup links inside the same webview.
+app.on("web-contents-created", (_event, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (contents.getType() === "webview" && url) {
+      contents.loadURL(url);
+    }
+    return { action: "deny" };
+  });
+});
