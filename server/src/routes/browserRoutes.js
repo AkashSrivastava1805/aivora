@@ -4,6 +4,7 @@ import {
   getEngineStatusController,
   getRecentSearchesController,
   getTabsController,
+  navigateActiveTabController,
   openTabController,
   reconcileTabsController,
   searchController,
@@ -16,6 +17,7 @@ const router = Router();
 
 router.use(authMiddleware);
 router.post("/open-tab", enforceStudentRestrictions, openTabController);
+router.post("/navigate-active", enforceStudentRestrictions, navigateActiveTabController);
 router.post("/close-tab", closeTabController);
 router.post("/switch-tab", switchTabController);
 router.post("/search", enforceStudentRestrictions, searchController);

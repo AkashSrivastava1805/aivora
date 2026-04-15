@@ -8,7 +8,17 @@ const browserState = {
 };
 
 function isPlaywrightExecutableMissing(error) {
-  return String(error?.message || "").includes("Executable doesn't exist");
+  const msg = String(error?.message || "");
+  // Playwright not installed / binary missing
+  if (msg.includes("Executable doesn't exist")) return true;
+  // Linux deps missing (common on fresh Ubuntu servers/containers)
+  if (msg.includes("error while loading shared libraries")) return true;
+  if (msg.includes("libatk-1.0.so.0")) return true;
+  if (msg.includes("libatk-bridge-2.0.so.0")) return true;
+  if (msg.includes("libgbm.so.1")) return true;
+  if (msg.includes("libnss3.so")) return true;
+  if (msg.includes("libxkbcommon.so")) return true;
+  return false;
 }
 
 function normalizeUrl(input) {
@@ -118,6 +128,29 @@ export async function openTab(userId, url) {
   session.pages.push(tab);
   session.activeTabId = tab.tabId;
   return tab;
+}
+
+export async function navigateActiveTab(userId, url) {
+  const session = await getOrCreateUserSession(userId);
+  const resolved = normalizeUrl(url);
+  const active = session.pages.find((tab) => tab.tabId === session.activeTabId) || null;
+  if (!active) {
+    // No active tab exists yet; fall back to opening one.
+    const tab = await openTab(userId, resolved);
+    return { tab, session, createdNewTab: true };
+  }
+
+  // Virtual mode: update metadata only.
+  if (!active.page) {
+    active.url = resolved;
+    active.title = inferTitleFromUrl(resolved);
+    return { tab: active, session, createdNewTab: false };
+  }
+
+  await active.page.goto(resolved, { waitUntil: "domcontentloaded", timeout: 20000 });
+  active.url = active.page.url();
+  active.title = await active.page.title();
+  return { tab: active, session, createdNewTab: false };
 }
 
 export async function closeTab(userId, tabId) {
@@ -230,7 +263,15 @@ export async function reconcileUserSession(userId, persistedTabs = [], persisted
 }
 
 export async function getEngineRuntimeStatus() {
-  await getBrowser();
+  try {
+    await getBrowser();
+  } catch (error) {
+    if (isPlaywrightExecutableMissing(error)) {
+      browserState.runtimeMode = "virtual";
+    } else {
+      throw error;
+    }
+  }
   return {
     mode: browserState.runtimeMode,
     isPlaywright: browserState.runtimeMode === "playwright"

@@ -1,6 +1,13 @@
 import { analyzeTabs } from "../ai/tabOptimizer.js";
 import { getSmartSearchResults } from "../ai/geminiSearch.js";
-import { closeTab, getEngineRuntimeStatus, openTab, reconcileUserSession, switchTab } from "../browser/sessionManager.js";
+import {
+  closeTab,
+  getEngineRuntimeStatus,
+  navigateActiveTab,
+  openTab,
+  reconcileUserSession,
+  switchTab
+} from "../browser/sessionManager.js";
 import { BrowserSession } from "../models/BrowserSession.js";
 import { History } from "../models/History.js";
 import { SearchCache } from "../models/SearchCache.js";
@@ -63,6 +70,71 @@ export async function openTabController(req, res, next) {
       tab,
       tabs: session.tabs,
       activeTabId: newTab.tabId,
+      aiActions: analyzeTabs(session.tabs)
+    });
+  } catch (error) {
+    if (String(error?.message || "").includes("Executable doesn't exist")) {
+      return res.status(503).json({
+        message: "Cloud browser is not installed on server. Run: npx playwright install"
+      });
+    }
+    next(error);
+  }
+}
+
+export async function navigateActiveTabController(req, res, next) {
+  try {
+    const { url } = req.body;
+    if (!url || !url.trim()) {
+      return res.status(400).json({ message: "URL is required" });
+    }
+
+    const { tab, createdNewTab } = await navigateActiveTab(String(req.user._id), url);
+
+    const currentSession = await BrowserSession.findOne({ userId: req.user._id });
+    const existingTabs = currentSession?.tabs?.map((t) => t.toObject()) || [];
+
+    // If we had to create a new tab (no active existed), append it; else update active tab.
+    const updatedTabs = createdNewTab
+      ? [
+          ...existingTabs,
+          {
+            tabId: tab.tabId,
+            url: tab.url,
+            title: tab.title,
+            isActive: true,
+            lastInteractionAt: new Date(),
+            estimatedRamMb: Math.floor(Math.random() * 100 + 80),
+            estimatedCpuPct: Math.floor(Math.random() * 30 + 10)
+          }
+        ]
+      : existingTabs.map((t) =>
+          t.tabId === (currentSession?.tabs?.find((x) => x.isActive)?.tabId || tab.tabId)
+            ? { ...t, url: tab.url, title: tab.title, lastInteractionAt: new Date() }
+            : t
+        );
+
+    const nextActiveTabId =
+      currentSession?.tabs?.find((x) => x.isActive)?.tabId || tab.tabId || updatedTabs[0]?.tabId || null;
+    const normalizedTabs = mapTabsWithActive(updatedTabs, nextActiveTabId);
+    const session = await upsertBrowserSession(req.user._id, normalizedTabs, nextActiveTabId);
+
+    await History.findOneAndUpdate(
+      { userId: req.user._id },
+      { $push: { visitedUrls: { url: tab.url, title: tab.title, blocked: false, durationSeconds: 0 } } },
+      { upsert: true, new: true }
+    );
+
+    await recordStudentEvent(req, {
+      type: "NAVIGATE_ACTIVE_TAB",
+      status: "allowed",
+      details: `Navigated active tab: ${tab.url}`
+    });
+
+    res.json({
+      tab,
+      tabs: session.tabs,
+      activeTabId: nextActiveTabId,
       aiActions: analyzeTabs(session.tabs)
     });
   } catch (error) {
