@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import AppLayout from "../layouts/AppLayout";
 
 export default function AiTutorPage() {
+  const BING_HOME_URL = "https://www.bing.com/";
+  const BING_FALLBACK_URL = "https://www.bing.com/search?q=bing";
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [loaded, setLoaded] = useState(false);
@@ -32,9 +34,12 @@ export default function AiTutorPage() {
   };
 
   const src = useMemo(() => {
-    const raw = params.get("url") || "https://aivorachatfrontend.vercel.app/";
-    return toSafeHttpUrl(raw) || `https://www.bing.com/search?q=${encodeURIComponent(raw)}`;
-  }, [params]);
+    const rawParam = String(params.get("url") || "").trim();
+    if (!rawParam || rawParam.toLowerCase() === "new" || rawParam.toLowerCase() === "blank") {
+      return BING_HOME_URL;
+    }
+    return toSafeHttpUrl(rawParam) || `https://www.bing.com/search?q=${encodeURIComponent(rawParam)}`;
+  }, [params, BING_HOME_URL]);
   const heading = useMemo(() => params.get("title") || "Ai tutor", [params]);
   const isElectron = Boolean(window.aivora?.platform);
   const [tabs, setTabs] = useState([]);
@@ -69,6 +74,10 @@ export default function AiTutorPage() {
     setActiveTabId(nextTab.id);
   }
 
+  function openManualNewTab() {
+    openTabInApp(BING_HOME_URL, "Bing");
+  }
+
   function closeTab(tabId) {
     setTabs((prev) => {
       if (prev.length <= 1) return prev;
@@ -96,6 +105,28 @@ export default function AiTutorPage() {
     if (!currentUrl || !nextUrl) return false;
     // When user is on Bing results and clicks an external result, open it in a new in-app tab.
     return isBingHost(currentUrl) && !isBingHost(nextUrl);
+  }
+
+  function decodeBingRedirectUrl(url) {
+    const safe = toSafeHttpUrl(url);
+    if (!safe || !isBingHost(safe)) return safe;
+    try {
+      const parsed = new URL(safe);
+      const candidate = parsed.searchParams.get("u") || parsed.searchParams.get("url") || parsed.searchParams.get("r");
+      if (!candidate) return safe;
+      if (candidate.startsWith("http://") || candidate.startsWith("https://")) {
+        return toSafeHttpUrl(candidate) || safe;
+      }
+      // Bing commonly prefixes with "a1" and base64-url payload.
+      let payload = candidate;
+      if (/^a[0-9]/i.test(payload)) payload = payload.slice(2);
+      payload = payload.replace(/-/g, "+").replace(/_/g, "/");
+      while (payload.length % 4 !== 0) payload += "=";
+      const decoded = atob(payload);
+      return toSafeHttpUrl(decoded) || safe;
+    } catch (_error) {
+      return safe;
+    }
   }
 
   useEffect(() => {
@@ -139,7 +170,21 @@ export default function AiTutorPage() {
     if (!node) return undefined;
 
     const onReady = () => setLoaded(true);
-    const onFail = () => setFailed(true);
+    const onFail = (event) => {
+      const failedUrl = String(event?.validatedURL || "");
+      // Some Bing home variants may be blocked by response policy in webview.
+      // Fall back to a Bing search URL that reliably renders in-app.
+      if (
+        failedUrl &&
+        failedUrl.startsWith(BING_HOME_URL) &&
+        node?.loadURL
+      ) {
+        node.loadURL(BING_FALLBACK_URL);
+        updateActiveTab({ url: BING_FALLBACK_URL, title: "Bing" });
+        return;
+      }
+      setFailed(true);
+    };
     const onNavigate = (event) => {
       setLoaded(true);
       setFailed(false);
@@ -150,7 +195,7 @@ export default function AiTutorPage() {
         });
       }
     };
-    const normalizeInAppUrl = (url) => toSafeHttpUrl(url) || src;
+    const normalizeInAppUrl = (url) => decodeBingRedirectUrl(toSafeHttpUrl(url) || src);
     const getCurrentActiveUrl = () => {
       const active = tabsRef.current.find((tab) => tab.id === activeTabId);
       return active?.url || "";
@@ -182,6 +227,16 @@ export default function AiTutorPage() {
         if (node?.loadURL) node.loadURL(normalized);
       }
     };
+    const onRedirect = (event) => {
+      const nextUrl = event?.url;
+      const normalized = normalizeInAppUrl(nextUrl);
+      const currentUrl = getCurrentActiveUrl();
+      if (!normalized) return;
+      if (shouldOpenAsNewTab(currentUrl, normalized)) {
+        if (node?.stop) node.stop();
+        openTabInApp(normalized, inferTitleFromUrl(normalized));
+      }
+    };
     const onPageTitle = (event) => {
       const nextTitle = String(event?.title || "").trim();
       if (nextTitle) {
@@ -195,6 +250,7 @@ export default function AiTutorPage() {
     node.addEventListener("did-navigate-in-page", onNavigate);
     node.addEventListener("new-window", onNewWindow);
     node.addEventListener("will-navigate", onWillNavigate);
+    node.addEventListener("did-redirect-navigation", onRedirect);
     node.addEventListener("page-title-updated", onPageTitle);
     return () => {
       node.removeEventListener("dom-ready", onReady);
@@ -203,9 +259,10 @@ export default function AiTutorPage() {
       node.removeEventListener("did-navigate-in-page", onNavigate);
       node.removeEventListener("new-window", onNewWindow);
       node.removeEventListener("will-navigate", onWillNavigate);
+      node.removeEventListener("did-redirect-navigation", onRedirect);
       node.removeEventListener("page-title-updated", onPageTitle);
     };
-  }, [isElectron, src, activeTabId]);
+  }, [isElectron, src, activeTabId, BING_HOME_URL, BING_FALLBACK_URL]);
 
   return (
     <AppLayout title={heading}>
@@ -227,6 +284,9 @@ export default function AiTutorPage() {
                 ) : null}
               </div>
             ))}
+            <button className="ai-tutor-tab-add" onClick={openManualNewTab} aria-label="Open new tab" title="New tab">
+              +
+            </button>
           </div>
           <div className="ai-tutor-spacer" />
         </div>
