@@ -1,20 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import WarningOverlay from "../components/WarningOverlay";
 import AppLayout from "../layouts/AppLayout";
 import api from "../services/api";
-import { socket } from "../services/socket";
-
-const appItems = [
-  { label: "News", url: "https://news.google.com" },
-  { label: "Spotify", url: "https://open.spotify.com" },
-  { label: "Twitch", url: "https://www.twitch.tv" },
-  { label: "Skype", url: "https://web.skype.com" },
-  { label: "Flickr", url: "https://www.flickr.com" },
-  { label: "Vimeo", url: "https://vimeo.com" },
-  { label: "Tumblr", url: "https://www.tumblr.com" },
-  { label: "Drive", url: "https://drive.google.com" }
-];
 
 export default function BrowserDashboard({ session, mode = "normal", onLogout }) {
   const navigate = useNavigate();
@@ -30,116 +18,27 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   const [weather, setWeather] = useState({ label: "Locating...", temp: "--", wind: "--" });
   const [recentSearches, setRecentSearches] = useState([]);
   const [recentOpen, setRecentOpen] = useState(false);
-  const [spotifyStatus, setSpotifyStatus] = useState({ connected: false, displayName: "" });
   const [actionStatus, setActionStatus] = useState("");
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
   const [engineMode, setEngineMode] = useState("unknown");
-  const [liveFrame, setLiveFrame] = useState({
-    imageBase64: null,
-    url: "",
-    title: "",
-    viewportWidth: null,
-    viewportHeight: null,
-    tabId: null
-  });
-  const liveViewRef = useRef(null);
-  const viewportSizeRef = useRef({ w: 1280, h: 720 });
 
   const isStudent = mode === "student";
   const shellToneClass = isStudent
     ? "from-indigo-200/25 to-violet-200/20"
     : "from-cyan-200/25 to-sky-200/20";
-  const featuredItems = (resultItems.length > 0 ? resultItems : recentSearches.map((r) => ({ title: r.query, snippet: "Recent search" })))
-    .slice(0, 4)
-    .map((item, idx) => ({
-      id: `${item.title}-${idx}`,
-      title: item.title,
-      subtitle: item.snippet || "Interactive content",
-      tag: idx % 2 === 0 ? "Interactive" : "360 Content"
-    }));
-
-  function joinUserSocketRoom() {
-    const uid = session?.user?.id;
-    if (!uid) return;
-    socket.emit("join-user-room", { userId: String(uid) });
-  }
-
-  function bumpLiveFrame() {
-    if (!socket.connected) {
-      socket.connect();
-      return;
-    }
-    socket.emit("request-tab-frame");
-  }
-
-  function sendBrowserInput(input) {
-    const uid = session?.user?.id;
-    if (!uid || !socket.connected) return;
-    socket.emit("browser-input", { userId: String(uid), input });
-  }
-
-  function mapPointerToViewport(e, imgEl) {
-    if (!imgEl) return null;
-    const rect = imgEl.getBoundingClientRect();
-    const nw = imgEl.naturalWidth || viewportSizeRef.current.w;
-    const nh = imgEl.naturalHeight || viewportSizeRef.current.h;
-    if (!nw || !nh) return null;
-    const rw = rect.width;
-    const rh = rect.height;
-    const scale = Math.min(rw / nw, rh / nh);
-    const dispW = nw * scale;
-    const dispH = nh * scale;
-    const ox = (rw - dispW) / 2;
-    const oy = (rh - dispH) / 2;
-    const lx = e.clientX - rect.left - ox;
-    const ly = e.clientY - rect.top - oy;
-    if (lx < 0 || ly < 0 || lx > dispW || ly > dispH) return null;
-    return { x: (lx / dispW) * nw, y: (ly / dispH) * nh };
-  }
-
   useEffect(() => {
-    socket.connect();
-    const onHeartbeat = ({ at }) => setHeartbeat(at);
-    const onTabFrame = (frame) => {
-      const vw = frame?.viewportWidth;
-      const vh = frame?.viewportHeight;
-      if (vw && vh) viewportSizeRef.current = { w: vw, h: vh };
-      setLiveFrame({
-        imageBase64: frame?.imageBase64 || null,
-        url: frame?.url || "",
-        title: frame?.title || "",
-        viewportWidth: vw ?? null,
-        viewportHeight: vh ?? null,
-        tabId: frame?.tabId ?? null
-      });
-    };
-    const onConnect = () => {
-      joinUserSocketRoom();
-      bumpLiveFrame();
-    };
-
-    socket.on("platform-heartbeat", onHeartbeat);
-    socket.on("tab-frame", onTabFrame);
-    socket.on("connect", onConnect);
-
-    if (socket.connected) onConnect();
-
-    return () => {
-      socket.off("platform-heartbeat", onHeartbeat);
-      socket.off("tab-frame", onTabFrame);
-      socket.off("connect", onConnect);
-      socket.disconnect();
-    };
-  }, [session?.user?.id]);
+    const tick = setInterval(() => setHeartbeat(new Date().toISOString()), 20000);
+    setHeartbeat(new Date().toISOString());
+    return () => clearInterval(tick);
+  }, []);
 
   useEffect(() => {
     loadRecentSearches();
-    loadSpotifyStatus();
     loadTabs();
     loadEngineStatus();
 
-    const timer = setInterval(loadEngineStatus, 10000);
+    const timer = setInterval(loadEngineStatus, 45000);
     return () => clearInterval(timer);
   }, []);
 
@@ -169,8 +68,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
 
     loadWeather();
   }, []);
-
-  const topSuggestion = useMemo(() => resultItems[0]?.title || "Google News - Daily Headlines", [resultItems]);
 
   function looksLikeDomainOrUrl(value) {
     const input = value.trim().toLowerCase();
@@ -210,7 +107,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
       setActionStatus(data.navigationWarning || `Opened in app: ${resolvedUrl}`);
-      bumpLiveFrame();
     } catch (error) {
       if (error.response?.status === 403) setWarning(error.response?.data?.message || "Website blocked");
       else setActionStatus("Unable to open website in app.");
@@ -272,52 +168,15 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setActionStatus(`Opened: ${resolvedUrl}`);
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
-      bumpLiveFrame();
     } catch (error) {
       if (error.response?.status === 403) setWarning(error.response?.data?.message || "Website blocked");
       else setActionStatus("Unable to open tab. Please verify URL.");
     }
   }
 
-  async function openAppTab(url, label) {
-    try {
-      setWarning("");
-      const { data } = await api.post("/browser/open-tab", { url });
-      setActionStatus(`${label} opened in cloud browser.`);
-      setTabs(data.tabs || []);
-      setActiveTabId(data.activeTabId || null);
-      bumpLiveFrame();
-    } catch (error) {
-      if (error.response?.status === 403) setWarning(error.response?.data?.message || "App blocked by parent policy");
-      else setActionStatus(`Failed to open ${label}.`);
-    }
-  }
-
   async function loadRecentSearches() {
     const { data } = await api.get("/browser/recent-searches?limit=6");
     setRecentSearches(data.searches || []);
-  }
-
-  async function loadSpotifyStatus() {
-    try {
-      const { data } = await api.get("/auth/spotify/status");
-      setSpotifyStatus({
-        connected: Boolean(data.connected),
-        displayName: data.displayName || ""
-      });
-    } catch (_error) {
-      setSpotifyStatus({ connected: false, displayName: "" });
-    }
-  }
-
-  async function connectSpotify() {
-    try {
-      const { data } = await api.get("/auth/spotify/connect");
-      window.open(data.authUrl, "_blank", "width=540,height=720");
-      setActionStatus("Spotify connect window opened. Complete login there.");
-    } catch (error) {
-      setActionStatus(error.response?.data?.message || "Spotify connect is not configured.");
-    }
   }
 
   async function openResultTab(item) {
@@ -379,13 +238,11 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
         setActiveTabId(reconcile.data?.activeTabId || null);
         if (reconciledTabs.length > 0) {
           setActionStatus("Recovered previous cloud tabs after reconnect.");
-          bumpLiveFrame();
           return;
         }
       }
       setTabs(loadedTabs);
       setActiveTabId(data.activeTabId || null);
-      bumpLiveFrame();
     } catch (_error) {
       setTabs([]);
       setActiveTabId(null);
@@ -407,7 +264,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || tabId);
       setActionStatus("Switched active tab.");
-      bumpLiveFrame();
     } catch (_error) {
       setActionStatus("Unable to switch tab.");
     }
@@ -419,7 +275,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
       setActionStatus("Tab closed.");
-      bumpLiveFrame();
     } catch (_error) {
       setActionStatus("Unable to close tab.");
     }

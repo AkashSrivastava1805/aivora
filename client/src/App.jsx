@@ -100,7 +100,8 @@ export default function App() {
       }
     }
     monitorCloud();
-    cloudTimer = setInterval(monitorCloud, 12000);
+    // Lower background load while keeping connectivity awareness.
+    cloudTimer = setInterval(monitorCloud, 30000);
 
     socket.on("connect", () => {
       const now = Date.now();
