@@ -199,10 +199,10 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     return `https://www.bing.com/search?q=${encodeURIComponent(input)}`;
   }
 
-  async function navigateFromInput() {
+  async function navigateFromInput(rawInput = search) {
     try {
       setWarning("");
-      const trimmed = search.trim();
+      const trimmed = String(rawInput || "").trim();
       if (!trimmed) return;
       const resolvedUrl = buildOpenUrlFromInput(trimmed);
       let data;
@@ -238,7 +238,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       // If user typed a domain/URL, open it directly inside the app (cloud tab).
       if (looksLikeDomainOrUrl(trimmed)) {
         setActionStatus(`Opening website in app: ${buildOpenUrlFromInput(trimmed)}`);
-        await navigateFromInput();
+        await navigateFromInput(trimmed);
         setResultItems([]);
         setHasMoreResults(false);
         setSearchPage(1);
@@ -247,7 +247,11 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
         return;
       }
 
-      const { data } = await api.post("/browser/search", { query: trimmed, page: 1, limit: 6 });
+      // Perceived speed: open search engine results in cloud view immediately.
+      await navigateFromInput(trimmed);
+      setActionStatus(`Searching smart results for "${trimmed}"...`);
+
+      const { data } = await api.post("/browser/search", { query: trimmed, page: 1, limit: 6 }, { timeout: 15000 });
       setResultItems(data.results || []);
       setHasMoreResults(Boolean(data.hasMore));
       setSearchPage(1);
@@ -685,10 +689,18 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                 <div className="edu-results">
                   {resultItems.length === 0 ? <p className="edu-muted">Results will appear here after you search.</p> : null}
                   {resultItems.map((item) => (
-                    <button
+                    <div
                       key={`${item.url}-${item.title}`}
                       className="edu-result"
                       onClick={() => openResultTab(item, { fullScreen: true })}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openResultTab(item, { fullScreen: true });
+                        }
+                      }}
                     >
                       <div className="min-w-0">
                         <p className="edu-result-title truncate">{item.title}</p>
@@ -703,13 +715,16 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            openResultTab(item, { fullScreen: true });
+                            const targetUrl = item?.url || buildOpenUrlFromInput(item?.title || "");
+                            if (targetUrl) {
+                              window.open(targetUrl, "_blank", "noopener,noreferrer");
+                            }
                           }}
                         >
                           Redirect
                         </button>
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </div>
               </div>
