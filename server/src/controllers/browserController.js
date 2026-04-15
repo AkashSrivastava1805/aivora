@@ -31,6 +31,15 @@ function mapTabsWithActive(tabs = [], activeTabId = null) {
   }));
 }
 
+function isMicrosoftBingUrl(rawUrl = "") {
+  try {
+    const host = new URL(String(rawUrl)).hostname.toLowerCase();
+    return host.includes("bing.com") || host.includes("microsoft.com") || host.includes("msn.com");
+  } catch (_error) {
+    return false;
+  }
+}
+
 export async function openTabController(req, res, next) {
   try {
     const { url } = req.body;
@@ -251,8 +260,10 @@ export async function searchController(req, res, next) {
       );
     }
 
-    const pagedResults = allResults.slice(start, end);
-    const hasMore = end < allResults.length;
+    // User requirement: show only Microsoft/Bing website results.
+    const bingOnlyResults = allResults.filter((item) => isMicrosoftBingUrl(item?.url));
+    const pagedResults = bingOnlyResults.slice(start, end);
+    const hasMore = end < bingOnlyResults.length;
     const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(cleanedQuery)}`;
 
     if (pageNum === 1) {
@@ -277,7 +288,8 @@ export async function searchController(req, res, next) {
       page: pageNum,
       limit: perPage,
       hasMore,
-      fromCache
+      fromCache,
+      provider: "bing-only"
     });
   } catch (error) {
     next(error);
