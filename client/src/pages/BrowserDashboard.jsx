@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import MiniAnalyticsChart from "../components/MiniAnalyticsChart";
 import WarningOverlay from "../components/WarningOverlay";
 import AppLayout from "../layouts/AppLayout";
 import api from "../services/api";
@@ -29,27 +28,46 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   const [searchMeta, setSearchMeta] = useState({ fromCache: false });
   const [heartbeat, setHeartbeat] = useState("");
   const [weather, setWeather] = useState({ label: "Locating...", temp: "--", wind: "--" });
-  const [analytics, setAnalytics] = useState([1, 2, 1, 3, 2, 4, 3]);
   const [recentSearches, setRecentSearches] = useState([]);
   const [spotifyStatus, setSpotifyStatus] = useState({ connected: false, displayName: "" });
   const [actionStatus, setActionStatus] = useState("");
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
   const [engineMode, setEngineMode] = useState("unknown");
+  const [liveFrame, setLiveFrame] = useState({ imageBase64: null, url: "", title: "" });
 
   const isStudent = mode === "student";
   const shellToneClass = isStudent
     ? "from-indigo-200/25 to-violet-200/20"
     : "from-cyan-200/25 to-sky-200/20";
+  const featuredItems = (resultItems.length > 0 ? resultItems : recentSearches.map((r) => ({ title: r.query, snippet: "Recent search" })))
+    .slice(0, 4)
+    .map((item, idx) => ({
+      id: `${item.title}-${idx}`,
+      title: item.title,
+      subtitle: item.snippet || "Interactive content",
+      tag: idx % 2 === 0 ? "Interactive" : "360 Content"
+    }));
 
   useEffect(() => {
     socket.connect();
     socket.on("platform-heartbeat", ({ at }) => setHeartbeat(at));
+    if (session?.user?.id) {
+      socket.emit("join-user-room", { userId: session.user.id });
+    }
+    socket.on("tab-frame", (frame) => {
+      setLiveFrame({
+        imageBase64: frame?.imageBase64 || null,
+        url: frame?.url || "",
+        title: frame?.title || ""
+      });
+    });
     return () => {
       socket.off("platform-heartbeat");
+      socket.off("tab-frame");
       socket.disconnect();
     };
-  }, []);
+  }, [session?.user?.id]);
 
   useEffect(() => {
     loadRecentSearches();
@@ -89,6 +107,16 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   }, []);
 
   const topSuggestion = useMemo(() => resultItems[0]?.title || "Google News - Daily Headlines", [resultItems]);
+  const activeTabUrl = useMemo(() => tabs.find((tab) => tab.tabId === activeTabId)?.url || "", [tabs, activeTabId]);
+  const addressValue = search || liveFrame.url || activeTabUrl || "Search in cloud browser";
+  const addressHost = useMemo(() => {
+    try {
+      const parsed = new URL(addressValue.startsWith("http") ? addressValue : `https://${addressValue}`);
+      return parsed.hostname.replace(/^www\./, "");
+    } catch (_error) {
+      return addressValue;
+    }
+  }, [addressValue]);
 
   function looksLikeDomainOrUrl(value) {
     const input = value.trim().toLowerCase();
@@ -114,7 +142,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       if (!trimmed) return;
       const { data } = await api.post("/browser/search", { query: trimmed, page: 1, limit: 6 });
       setResultItems(data.results || []);
-      setAnalytics((prev) => [...prev.slice(1), Math.min(9, (data.results?.length || 0) + 2)]);
       setHasMoreResults(Boolean(data.hasMore));
       setSearchPage(1);
       setActiveQuery(trimmed);
@@ -159,7 +186,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       }
       const resolvedUrl = buildOpenUrlFromInput(trimmed);
       const { data } = await api.post("/browser/open-tab", { url: resolvedUrl });
-      setAnalytics((prev) => [...prev.slice(1), Math.min(9, prev[prev.length - 1] + 1)]);
       setActionStatus(`Opened: ${resolvedUrl}`);
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
@@ -214,7 +240,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setWarning("");
       const { data } = await api.post("/browser/open-tab", { url: item.url });
       setActionStatus(`Opened result: ${item.title}`);
-      setAnalytics((prev) => [...prev.slice(1), Math.min(9, prev[prev.length - 1] + 1)]);
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
     } catch (error) {
@@ -229,6 +254,30 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   function handleLogout() {
     if (onLogout) onLogout();
     navigate("/");
+  }
+
+  function handleHome() {
+    setSearch("bing.com");
+    openTabFromInput();
+  }
+
+  function handleMicSearch() {
+    const speech =
+      window.SpeechRecognition || window.webkitSpeechRecognition || window.mozSpeechRecognition || window.msSpeechRecognition;
+    if (!speech) {
+      setActionStatus("Voice search is not supported in this environment.");
+      return;
+    }
+    const recognition = new speech();
+    recognition.lang = "en-US";
+    recognition.onresult = (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript || "";
+      if (transcript) {
+        setSearch(transcript);
+        setActionStatus(`Voice captured: "${transcript}"`);
+      }
+    };
+    recognition.start();
   }
 
   async function loadTabs() {
@@ -353,6 +402,59 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
           </aside>
 
           <section className="space-y-4">
+            <div className="rounded-2xl border border-white/20 bg-[#1a1035]/90 p-3">
+              <div className="chrome-topbar">
+                <button className="chrome-icon-btn" onClick={loadTabs} title="Refresh tabs" aria-label="Refresh tabs">
+                  ↻
+                </button>
+                <button className="chrome-icon-btn" onClick={handleHome} title="Home" aria-label="Home">
+                  ⌂
+                </button>
+                <div className="chrome-address-chip">
+                  <span className="chrome-lock">🔒</span>
+                  <input
+                    className="chrome-address-input"
+                    placeholder="Search Google or type a URL"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") runSearch();
+                    }}
+                  />
+                </div>
+                <button className="chrome-icon-btn" onClick={runSearch} title="Search" aria-label="Search">
+                  🔍
+                </button>
+                <button className="chrome-icon-btn" onClick={handleMicSearch} title="Voice search" aria-label="Voice search">
+                  🎙
+                </button>
+              </div>
+              <div className="mt-2 flex items-center justify-between px-1">
+                <p className="chrome-active-url truncate">
+                  Active: <span>{addressHost}</span>
+                </p>
+                <p className="text-[10px] text-white/55">{engineMode === "playwright" ? "Live Chromium" : "Virtual fallback"}</p>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/20 bg-[#1a1035]/90 p-3 text-white">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm font-semibold">Cloud Live View (WebSocket)</p>
+                <p className="text-[11px] text-white/70">{liveFrame.url || tabs.find((t) => t.tabId === activeTabId)?.url || "-"}</p>
+              </div>
+              {liveFrame.imageBase64 ? (
+                <img
+                  src={`data:image/jpeg;base64,${liveFrame.imageBase64}`}
+                  alt="Cloud tab frame"
+                  className="h-56 w-full rounded-xl border border-white/15 object-cover"
+                />
+              ) : (
+                <div className="flex h-56 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-xs text-white/70">
+                  Waiting for cloud frame... (Virtual mode streams metadata only)
+                </div>
+              )}
+            </div>
+
             <div className="rounded-2xl border border-white/30 bg-white/50 p-4 shadow-[0_8px_28px_rgba(2,6,23,0.18)]">
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-sm font-semibold text-slate-800">Multi-Tab Cloud Session</p>
@@ -401,6 +503,36 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                   Active tab: {tabs.find((tab) => tab.tabId === activeTabId)?.url || "Current tab"}
                 </p>
               )}
+            </div>
+
+            <div className="rounded-2xl border border-white/20 bg-[#1a1035]/90 p-4 text-white">
+              <p className="mb-3 text-sm font-semibold text-white/85">180 videos</p>
+              <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-1">
+                {appItems.map((app) => (
+                  <button
+                    key={`dot-${app.label}`}
+                    onClick={() => openAppTab(app.url, app.label)}
+                    className="h-9 min-w-9 rounded-full border border-white/25 bg-white/15 px-2 text-[10px] font-semibold text-white/90"
+                    title={app.label}
+                  >
+                    {app.label.slice(0, 2)}
+                  </button>
+                ))}
+              </div>
+              <p className="mb-3 text-sm font-semibold text-white/85">360 videos</p>
+              <div className="grid gap-3 md:grid-cols-4">
+                {featuredItems.map((item) => (
+                  <button
+                    key={item.id}
+                    className="vr-card text-left"
+                    onClick={() => openResultTab({ title: item.title, url: buildOpenUrlFromInput(item.title), snippet: item.subtitle })}
+                  >
+                    <span className="vr-badge">{item.tag}</span>
+                    <p className="mt-8 text-sm font-semibold">{item.title}</p>
+                    <p className="mt-1 text-xs text-white/75">{item.subtitle}</p>
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
@@ -529,13 +661,6 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
               )}
             </div>
 
-            <div className="soft-panel">
-              <p className="soft-title">Mini Analytics</p>
-              <MiniAnalyticsChart values={analytics} />
-              <p className="text-xs text-slate-600">
-                {isStudent ? "Student activity trend with parental controls." : "Weekly search and tab activity trend."}
-              </p>
-            </div>
           </section>
         </div>
       </div>
