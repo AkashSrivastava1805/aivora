@@ -220,7 +220,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       }
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
-      setActionStatus(`Opened in app: ${resolvedUrl}`);
+      setActionStatus(data.navigationWarning || `Opened in app: ${resolvedUrl}`);
       bumpLiveFrame();
     } catch (error) {
       if (error.response?.status === 403) setWarning(error.response?.data?.message || "Website blocked");
@@ -372,6 +372,9 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
       setActionStatus(`Opened in app: ${item?.title || targetUrl}`);
       setTabs(data.tabs || []);
       setActiveTabId(data.activeTabId || null);
+      if (data.navigationWarning) {
+        setActionStatus(data.navigationWarning);
+      }
       if (options.fullScreen) {
         setIsFullScreenView(true);
       }
