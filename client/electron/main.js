@@ -57,6 +57,7 @@ function createWindow() {
     }
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.openDevTools(); // Open DevTools automatically
   const isDev = !app.isPackaged;
   if (isDev) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL || "http://localhost:5173");
@@ -92,9 +93,10 @@ ipcMain.on("open-external-url", (_e, url) => {
 app.on("web-contents-created", (_event, contents) => {
   if (contents.getType() !== "webview") return;
 
-  // Inject content filtering script into pages
+  // Inject content filtering script into pages (only for student mode)
   contents.on("did-finish-load", () => {
-    if (!studentSession) return;
+    console.log("[Main] Webview did-finish-load");
+    if (!studentSession) return; // Only inject for students with active restrictions
     const { blockedKeywords = [], blockedDomains = [] } = studentSession;
     
     const filterScript = `
@@ -146,15 +148,8 @@ app.on("web-contents-created", (_event, contents) => {
               return false;
             }
             
-            // For Bing search results, open in external browser
-            if (window.location.hostname.includes('bing.com') && !target.href.includes('bing.com')) {
-              e.preventDefault();
-              e.stopPropagation();
-              if (window.ipcRenderer) {
-                window.ipcRenderer.send('open-external-url', target.href);
-              }
-              return false;
-            }
+            // Allow navigation to search results within the webview
+            // (removed external browser redirect)
           }
         }, true);
         
@@ -206,26 +201,34 @@ app.on("web-contents-created", (_event, contents) => {
   });
 
   contents.setWindowOpenHandler(({ url }) => {
-    if (url && mainWindow && !isOwnAppUrl(url)) {
-      if (!isBlockedByPolicy(url)) {
-        shell.openExternal(url).catch(() => {});
-      }
-    }
+    console.log("[Webview] setWindowOpenHandler:", url);
+    // Deny new windows - links should navigate in the same webview
     return { action: "deny" };
   });
 
   contents.on("will-navigate", async (e, url) => {
+    console.log("[Main] will-navigate:", url, "studentSession:", !!studentSession);
+    
     if (!url || !mainWindow || isOwnAppUrl(url)) return;
 
+    // For normal users (no studentSession), allow all navigation
+    if (!studentSession) {
+      console.log("[Main] Normal user - allowing navigation to:", url);
+      return; // Allow navigation
+    }
+
+    // Student mode: check restrictions
+    const { blockedKeywords = [], blockedDomains = [] } = studentSession;
+    
     // Check if it's a Bing search URL with query parameter
     const bingQuery = extractBingQuery(url);
-    if (bingQuery && studentSession) {
-      const { blockedKeywords = [], blockedDomains = [] } = studentSession;
+    if (bingQuery) {
       const queryLower = bingQuery.toLowerCase();
       const blockedKeyword = blockedKeywords.find((k) => k && queryLower.includes(k.toLowerCase()));
       const blockedDomain = blockedDomains.find((d) => d && queryLower.includes(d.toLowerCase()));
       
       if (blockedKeyword || blockedDomain) {
+        console.log("[Main] Blocking Bing search:", bingQuery);
         e.preventDefault();
         mainWindow.webContents.send("webview-blocked", { 
           url, 
@@ -236,39 +239,32 @@ app.on("web-contents-created", (_event, contents) => {
       }
     }
 
-    // For ALL URLs, check against blocked keywords and domains
-    if (studentSession) {
-      const { blockedKeywords = [], blockedDomains = [] } = studentSession;
-      const urlLower = url.toLowerCase();
-      
-      // Check if URL contains blocked domain
-      const blockedDomain = blockedDomains.find((d) => d && urlLower.includes(d.toLowerCase()));
-      if (blockedDomain) {
-        e.preventDefault();
-        mainWindow.webContents.send("webview-blocked", { 
-          url,
-          reason: `Domain "${blockedDomain}" is blocked by parental policy`
-        });
-        return;
-      }
-      
-      // Check if URL contains blocked keyword
-      const blockedKeyword = blockedKeywords.find((k) => k && urlLower.includes(k.toLowerCase()));
-      if (blockedKeyword) {
-        e.preventDefault();
-        mainWindow.webContents.send("webview-blocked", { 
-          url,
-          reason: `Keyword "${blockedKeyword}" is blocked by parental policy`
-        });
-        return;
-      }
+    // Check if URL contains blocked domain or keyword
+    const urlLower = url.toLowerCase();
+    
+    const blockedDomain = blockedDomains.find((d) => d && urlLower.includes(d.toLowerCase()));
+    if (blockedDomain) {
+      console.log("[Main] Blocking domain:", blockedDomain);
+      e.preventDefault();
+      mainWindow.webContents.send("webview-blocked", { 
+        url,
+        reason: `Domain "${blockedDomain}" is blocked by parental policy`
+      });
+      return;
+    }
+    
+    const blockedKeyword = blockedKeywords.find((k) => k && urlLower.includes(k.toLowerCase()));
+    if (blockedKeyword) {
+      console.log("[Main] Blocking keyword:", blockedKeyword);
+      e.preventDefault();
+      mainWindow.webContents.send("webview-blocked", { 
+        url,
+        reason: `Keyword "${blockedKeyword}" is blocked by parental policy`
+      });
+      return;
     }
 
-    // External (non-Bing) URLs → open in external browser
-    if (!isBingHost(url)) {
-      e.preventDefault();
-      shell.openExternal(url).catch(() => {});
-    }
-    // Bing URLs → allowed if passed all checks above
+    // Allow navigation if not blocked
+    console.log("[Main] Student user - allowing navigation to:", url);
   });
 });

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import WarningOverlay from "../components/WarningOverlay";
 import api from "../services/api";
 
-const BING_HOME = "https://www.bing.com/";
+const BING_HOME = "about:blank"; // Hide Bing homepage, use blank page
 
 function buildTabId() {
   return `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -27,7 +27,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   const isElectron = Boolean(window.aivora?.platform);
   const isStudent = mode === "student";
 
-  const initTab = { id: buildTabId(), url: BING_HOME, title: "New Tab" };
+  const initTab = { id: buildTabId(), url: "about:blank", title: "Aivora Learn" };
   const [tabs, setTabs] = useState([initTab]);
   const [activeTabId, setActiveTabId] = useState(initTab.id);
   const activeTabIdRef = useRef(initTab.id);
@@ -39,10 +39,13 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
   const [search, setSearch] = useState("");
   const [warning, setWarning] = useState("");
   const [recentSearches, setRecentSearches] = useState([]);
-  const [iframeUrls, setIframeUrls] = useState({ [initTab.id]: BING_HOME });
+  const [iframeUrls, setIframeUrls] = useState({ [initTab.id]: "about:blank" });
 
   // ── Init ──────────────────────────────────────────────────
-  useEffect(() => { loadRecentSearches(); }, []);
+  useEffect(() => { 
+    loadRecentSearches(); 
+    console.log("[BrowserDashboard] Initialized, isElectron:", isElectron);
+  }, []);
 
   // Client-side restrictions ref (synced from API, used for both search bars)
   const restrictionsRef = useRef({ blockedKeywords: [], blockedDomains: [] });
@@ -161,6 +164,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
 
   // ── Tab callbacks ─────────────────────────────────────────
   function handleTabNavigate(tabId, url) {
+    console.log("[BrowserDashboard] handleTabNavigate:", tabId, url);
     setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, url } : t)));
     if (tabId === activeTabIdRef.current) {
       try {
@@ -197,10 +201,13 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     setTabs((prev) => prev.map((t) => (t.id === tabId ? { ...t, title } : t)));
   }
 
-  function handleNewWindow(url) { if (openNewTabRef.current) openNewTabRef.current(url); }
+  function handleNewWindow(url) { 
+    console.log("[BrowserDashboard] handleNewWindow:", url);
+    if (openNewTabRef.current) openNewTabRef.current(url); 
+  }
 
   // ── Tab operations ────────────────────────────────────────
-  function openNewTab(url = BING_HOME, title = "") {
+  function openNewTab(url = "about:blank", title = "") {
     const newTab = { id: buildTabId(), url, title: title || inferTitle(url) };
     setTabs((prev) => [...prev, newTab]);
     setIframeUrls((prev) => ({ ...prev, [newTab.id]: url }));
@@ -254,7 +261,9 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
     // Validate with server BEFORE loading URL (enforces parental controls)
     try {
       await api.post("/browser/search", { query: trimmed, page: 1, limit: 1 }, { timeout: 10000 });
-      loadInActiveTab(buildSearchUrl(trimmed));
+      // Navigate directly to Bing search results instead of loading in webview
+      const searchUrl = buildSearchUrl(trimmed);
+      loadInActiveTab(searchUrl);
       await loadRecentSearches();
     } catch (err) {
       if (err?.response?.status === 403) {
@@ -304,7 +313,7 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
               )}
             </div>
           ))}
-          <button onClick={() => openNewTab(BING_HOME, "New Tab")} title="New tab"
+          <button onClick={() => openNewTab("about:blank", "New Tab")} title="New tab"
             style={{ width: "1.7rem", height: "1.7rem", borderRadius: "0.45rem", border: "1px solid rgba(15,23,42,0.14)", background: "#fff", fontSize: "1rem", fontWeight: 700, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
         </div>
 
@@ -316,45 +325,93 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
         </div>
       </div>
 
-      {/* ── Address / search bar — mirrors Bing input in real time ── */}
-      <div style={{ flexShrink: 0, background: "#fff", borderBottom: "1px solid rgba(15,23,42,0.07)", padding: "0.38rem 0.75rem", display: "flex", alignItems: "center", gap: "0.45rem" }}>
-        <button onClick={() => loadInActiveTab(BING_HOME)} title="Home"
-          style={{ border: "1px solid rgba(15,23,42,0.1)", borderRadius: "0.45rem", background: "#f1f5f9", width: 30, height: 30, fontSize: "0.95rem", cursor: "pointer", flexShrink: 0 }}>⌂</button>
-
-        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: "0.45rem", border: "1px solid rgba(15,23,42,0.12)", borderRadius: "0.55rem", background: "#f8fafc", padding: "0.28rem 0.6rem" }}>
-          <span style={{ opacity: 0.4, fontSize: "0.8rem" }}>🔎</span>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") doSearch(); }}
-            placeholder="Search or enter URL… (mirrors Bing)"
-            style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: "0.84rem", color: "#0f172a" }}
-          />
-          {search && (
-            <button onClick={() => setSearch("")}
-              style={{ border: "none", background: "transparent", color: "rgba(15,23,42,0.35)", fontSize: "0.9rem", cursor: "pointer", padding: 0 }}>×</button>
-          )}
-        </div>
-
-        <button onClick={handleMicSearch} title="Voice"
-          style={{ border: "1px solid rgba(15,23,42,0.1)", borderRadius: "0.45rem", background: "#f1f5f9", width: 30, height: 30, fontSize: "0.85rem", cursor: "pointer", flexShrink: 0 }}>🎙</button>
-        <button onClick={() => doSearch()}
-          style={{ border: "none", borderRadius: "0.45rem", background: "linear-gradient(180deg,#2563eb,#1d4ed8)", color: "#fff", padding: "0 0.8rem", height: 30, fontSize: "0.78rem", fontWeight: 700, cursor: "pointer", flexShrink: 0 }}>Search</button>
-
-        {recentSearches.length > 0 && (
-          <div style={{ display: "flex", gap: "0.28rem", overflowX: "auto", flexShrink: 0, maxWidth: 260 }}>
-            {recentSearches.slice(0, 4).map((r) => (
-              <button key={r.query} onClick={() => { setSearch(r.query); doSearch(r.query); }}
-                style={{ border: "1px solid rgba(37,99,235,0.18)", borderRadius: "9999px", background: "rgba(37,99,235,0.07)", color: "#1d4ed8", padding: "0.18rem 0.5rem", fontSize: "0.7rem", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>
-                {r.query}
-              </button>
-            ))}
+      {/* ── Aivora Learn Search Interface - Compact version ── */}
+      <div style={{ flexShrink: 0, background: "#fff", borderBottom: "1px solid rgba(15,23,42,0.07)", padding: "0.75rem 1rem" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: "0.75rem" }}>
+          {/* Aivora Learn Logo - Compact */}
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg,#2563eb,#0ea5e9)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 900, fontSize: "1rem", boxShadow: "0 2px 8px rgba(37,99,235,0.3)" }}>Ai</div>
+            <div>
+              <h1 style={{ fontSize: "1.25rem", fontWeight: 900, color: "#0f172a", margin: 0, lineHeight: 1 }}>Aivora Learn</h1>
+              <p style={{ fontSize: "0.75rem", color: "#64748b", margin: "0.1rem 0 0 0" }}>AI-Powered Educational Search</p>
+            </div>
           </div>
-        )}
+
+          {/* Search Box - Compact */}
+          <div style={{ width: "100%", maxWidth: 600, display: "flex", alignItems: "center", gap: "0.5rem", border: "2px solid rgba(37,99,235,0.2)", borderRadius: "9999px", background: "#f8fafc", padding: "0.4rem 0.8rem", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+            <span style={{ opacity: 0.5, fontSize: "1rem" }}>🔎</span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") doSearch(); }}
+              placeholder="Search for educational content..."
+              style={{ flex: 1, border: "none", outline: "none", background: "transparent", fontSize: "0.9rem", color: "#0f172a" }}
+            />
+            {search && (
+              <button onClick={() => setSearch("")}
+                style={{ border: "none", background: "transparent", color: "rgba(15,23,42,0.35)", fontSize: "1.1rem", cursor: "pointer", padding: 0 }}>×</button>
+            )}
+            <button onClick={handleMicSearch} title="Voice Search"
+              style={{ border: "none", background: "transparent", fontSize: "1rem", cursor: "pointer", padding: 0 }}>🎙</button>
+            <button onClick={() => doSearch()}
+              style={{ border: "none", borderRadius: "9999px", background: "linear-gradient(135deg,#2563eb,#1d4ed8)", color: "#fff", padding: "0.4rem 1.2rem", fontSize: "0.85rem", fontWeight: 700, cursor: "pointer", boxShadow: "0 2px 6px rgba(37,99,235,0.3)" }}>Search</button>
+          </div>
+
+          {/* Recent Searches - Compact */}
+          {recentSearches.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <span style={{ fontSize: "0.75rem", color: "#64748b", fontWeight: 600 }}>Recent Searches</span>
+              <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                {recentSearches.slice(0, 5).map((r) => (
+                  <button key={r.query} onClick={() => { setSearch(r.query); doSearch(r.query); }}
+                    style={{ border: "1px solid rgba(37,99,235,0.2)", borderRadius: "9999px", background: "rgba(37,99,235,0.05)", color: "#1d4ed8", padding: "0.3rem 0.8rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
+                    {r.query}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Quick Links - Compact */}
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
+            <button onClick={() => { setSearch("mathematics"); doSearch("mathematics"); }}
+              style={{ border: "1px solid rgba(15,23,42,0.1)", borderRadius: "0.4rem", background: "#fff", padding: "0.4rem 0.8rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", color: "#0f172a", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", alignItems: "center", gap: "0.3rem" }}><span>📐</span> Mathematics</button>
+            <button onClick={() => { setSearch("science"); doSearch("science"); }}
+              style={{ border: "1px solid rgba(15,23,42,0.1)", borderRadius: "0.4rem", background: "#fff", padding: "0.4rem 0.8rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", color: "#0f172a", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", alignItems: "center", gap: "0.3rem" }}><span>🔬</span> Science</button>
+            <button onClick={() => { setSearch("history"); doSearch("history"); }}
+              style={{ border: "1px solid rgba(15,23,42,0.1)", borderRadius: "0.4rem", background: "#fff", padding: "0.4rem 0.8rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", color: "#0f172a", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", alignItems: "center", gap: "0.3rem" }}><span>📚</span> History</button>
+            <button onClick={() => { setSearch("programming"); doSearch("programming"); }}
+              style={{ border: "1px solid rgba(15,23,42,0.1)", borderRadius: "0.4rem", background: "#fff", padding: "0.4rem 0.8rem", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", color: "#0f172a", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", alignItems: "center", gap: "0.3rem" }}><span>💻</span> Programming</button>
+          </div>
+        </div>
       </div>
 
       {/* ── Browser viewport ── */}
-      <div style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden" }}>
+      <div style={{ flex: 1, minHeight: 0, position: "relative", overflow: "hidden", background: "#f8fafc" }}>
+        {/* Show Aivora Learn interface when on blank page */}
+        {activeTab?.url === "about:blank" && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)" }}>
+            <div style={{ textAlign: "center", padding: "2rem" }}>
+              <div style={{ width: 120, height: 120, margin: "0 auto 2rem", borderRadius: 30, background: "linear-gradient(135deg,#2563eb,#0ea5e9)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 900, fontSize: "3rem", boxShadow: "0 8px 24px rgba(37,99,235,0.3)" }}>Ai</div>
+              <h2 style={{ fontSize: "2.5rem", fontWeight: 900, color: "#0f172a", margin: "0 0 0.5rem 0" }}>Welcome to Aivora Learn</h2>
+              <p style={{ fontSize: "1.1rem", color: "#64748b", margin: "0 0 2rem 0" }}>Start your educational journey by searching above</p>
+              <div style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap" }}>
+                <div style={{ padding: "1rem 1.5rem", background: "white", borderRadius: "0.75rem", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+                  <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>🎯</div>
+                  <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "#0f172a" }}>Safe Browsing</div>
+                </div>
+                <div style={{ padding: "1rem 1.5rem", background: "white", borderRadius: "0.75rem", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+                  <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>🧠</div>
+                  <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "#0f172a" }}>AI-Powered</div>
+                </div>
+                <div style={{ padding: "1rem 1.5rem", background: "white", borderRadius: "0.75rem", boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+                  <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>📚</div>
+                  <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "#0f172a" }}>Educational</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {isElectron ? (
           tabs.map((tab) => (
             <webview
@@ -373,10 +430,29 @@ export default function BrowserDashboard({ session, mode = "normal", onLogout })
                 // Only attach listeners once per webview element
                 if (webviewListenersAttached.current[tab.id]) return;
                 webviewListenersAttached.current[tab.id] = true;
-                node.addEventListener("did-navigate", (ev) => { if (ev?.url) handleTabNavigate(tab.id, ev.url); });
-                node.addEventListener("did-navigate-in-page", (ev) => { if (ev?.url) handleTabNavigate(tab.id, ev.url); });
-                node.addEventListener("page-title-updated", (ev) => { const t = String(ev?.title || "").trim(); if (t) handleTabTitle(tab.id, t); });
-                node.addEventListener("new-window", (ev) => { if (ev?.preventDefault) ev.preventDefault(); if (ev?.url) handleNewWindow(ev.url); });
+                
+                console.log("[Webview] Attaching event listeners for tab:", tab.id);
+                
+                node.addEventListener("did-navigate", (ev) => { 
+                  console.log("[Webview] did-navigate:", ev?.url);
+                  if (ev?.url) handleTabNavigate(tab.id, ev.url); 
+                });
+                node.addEventListener("did-navigate-in-page", (ev) => { 
+                  console.log("[Webview] did-navigate-in-page:", ev?.url);
+                  if (ev?.url) handleTabNavigate(tab.id, ev.url); 
+                });
+                node.addEventListener("page-title-updated", (ev) => { 
+                  const t = String(ev?.title || "").trim(); 
+                  if (t) handleTabTitle(tab.id, t); 
+                });
+                node.addEventListener("new-window", (ev) => { 
+                  console.log("[Webview] new-window event:", ev?.url);
+                  if (ev?.preventDefault) ev.preventDefault(); 
+                  if (ev?.url) handleNewWindow(ev.url); 
+                });
+                node.addEventListener("will-navigate", (ev) => {
+                  console.log("[Webview] will-navigate event:", ev?.url);
+                });
               }}
             />
           ))
