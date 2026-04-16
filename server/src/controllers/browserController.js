@@ -260,10 +260,8 @@ export async function searchController(req, res, next) {
       );
     }
 
-    // User requirement: show only Microsoft/Bing website results.
-    const bingOnlyResults = allResults.filter((item) => isMicrosoftBingUrl(item?.url));
-    const pagedResults = bingOnlyResults.slice(start, end);
-    const hasMore = end < bingOnlyResults.length;
+    const pagedResults = allResults.slice(start, end);
+    const hasMore = end < allResults.length;
     const searchUrl = `https://www.bing.com/search?q=${encodeURIComponent(cleanedQuery)}`;
 
     if (pageNum === 1) {
